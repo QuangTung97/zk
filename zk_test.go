@@ -241,7 +241,37 @@ func TestReconfig(t *testing.T) {
 
 	_, err = zk.Reconfig(s, -1)
 	requireNoError(t, err, "failed to reconfig cluster")
+}
 
+func TestOpsAfterCloseDontDeadlock(t *testing.T) {
+	ts, err := StartTestCluster(t, 1, nil, logWriter{t: t, p: "[ZKERR] "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Stop()
+	zk, _, err := ts.ConnectAll()
+	if err != nil {
+		t.Fatalf("Connect returned error: %+v", err)
+	}
+	zk.Close()
+
+	path := "/gozk-test"
+
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		for range make([]struct{}, 30) {
+			if _, err := zk.Create(path, []byte{1, 2, 3, 4}, 0, WorldACL(PermAll)); err == nil {
+				t.Fatal("Create did not return error")
+			}
+		}
+	}()
+	select {
+	case <-ch:
+		// expected
+	case <-time.After(10 * time.Second):
+		t.Fatal("ZK connection deadlocked when executing ops after a Close operation")
+	}
 }
 
 func TestMulti(t *testing.T) {
