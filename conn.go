@@ -10,6 +10,7 @@ Possible watcher events:
 */
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -102,9 +103,10 @@ type Conn struct {
 	reconnectLatch   chan struct{}
 	setWatchLimit    int
 	setWatchCallback func([]*setWatchesRequest)
+
 	// Debug (for recurring re-auth hang)
 	debugCloseRecvLoop bool
-	debugReauthDone    chan struct{}
+	resendZkAuthFn     func(context.Context, *Conn) error
 
 	logger  Logger
 	logInfo bool // true if information messages are logged; false if only errors are logged
@@ -207,6 +209,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 		logger:         DefaultLogger,
 		logInfo:        true, // default is true for backwards compatability
 		buf:            make([]byte, bufferSize),
+		resendZkAuthFn: resendZkAuth,
 	}
 
 	// Set provided options.
@@ -219,9 +222,11 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	}
 
 	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
+	// TODO: Connect should provide a way to specify a context for the connection
+	ctx := context.Background()
 
 	go func() {
-		conn.loop()
+		conn.loop(ctx)
 		conn.flushRequests(ErrClosing)
 		conn.invalidateWatches(ErrClosing)
 		close(conn.eventChan)
@@ -310,6 +315,8 @@ func WithMaxConnBufferSize(maxBufferSize int) connOption {
 	}
 }
 
+// Close will submit a close request with ZK and signal the connection to stop
+// sending and receiving packets.
 func (c *Conn) Close() {
 	c.shouldQuitOnce.Do(func() {
 		close(c.shouldQuit)
@@ -367,7 +374,9 @@ func (c *Conn) connect() error {
 		c.serverMu.Lock()
 		c.server, retryStart = c.hostProvider.Next()
 		c.serverMu.Unlock()
+
 		c.setState(StateConnecting)
+
 		if retryStart {
 			c.flushUnsentRequests(ErrNoServer)
 			select {
@@ -385,70 +394,12 @@ func (c *Conn) connect() error {
 			c.conn = zkConn
 			c.setState(StateConnected)
 			if c.logInfo {
-				c.logger.Printf("Connected to %s", c.Server())
+				c.logger.Printf("connected to %s", c.Server())
 			}
 			return nil
 		}
 
-		c.logger.Printf("Failed to connect to %s: %+v", c.Server(), err)
-	}
-}
-
-func (c *Conn) resendZkAuth(reauthReadyChan chan struct{}) {
-	shouldCancel := func() bool {
-		select {
-		case <-c.shouldQuit:
-			return true
-		case <-c.closeChan:
-			return true
-		default:
-			return false
-		}
-	}
-
-	c.credsMu.Lock()
-	defer c.credsMu.Unlock()
-
-	defer close(reauthReadyChan)
-
-	if c.logInfo {
-		c.logger.Printf("re-submitting `%d` credentials after reconnect", len(c.creds))
-	}
-
-	for _, cred := range c.creds {
-		if shouldCancel() {
-			return
-		}
-		resChan, err := c.sendRequest(
-			opSetAuth,
-			&setAuthRequest{Type: 0,
-				Scheme: cred.scheme,
-				Auth:   cred.auth,
-			},
-			&setAuthResponse{},
-			nil)
-
-		if err != nil {
-			c.logger.Printf("call to sendRequest failed during credential resubmit: %s", err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
-		}
-
-		var res response
-		select {
-		case res = <-resChan:
-		case <-c.closeChan:
-			c.logger.Printf("recv closed, cancel re-submitting credentials")
-			return
-		case <-c.shouldQuit:
-			c.logger.Printf("should quit, cancel re-submitting credentials")
-			return
-		}
-		if res.err != nil {
-			c.logger.Printf("credential re-submit failed: %s", res.err)
-			// FIXME(prozlach): lets ignore errors for now
-			continue
-		}
+		c.logger.Printf("failed to connect to %s: %v", c.Server(), err)
 	}
 }
 
@@ -477,7 +428,7 @@ func (c *Conn) sendRequest(
 	return rq.recvChan, nil
 }
 
-func (c *Conn) loop() {
+func (c *Conn) loop(ctx context.Context) {
 	for {
 		if err := c.connect(); err != nil {
 			// c.Close() was called
@@ -498,25 +449,29 @@ func (c *Conn) loop() {
 			}
 			c.hostProvider.Connected()        // mark success
 			c.closeChan = make(chan struct{}) // channel to tell send loop stop
-			reauthChan := make(chan struct{}) // channel to tell send loop that authdata has been resubmitted
 
 			var wg sync.WaitGroup
+
 			wg.Add(1)
 			go func() {
-				<-reauthChan
-				if c.debugCloseRecvLoop {
-					close(c.debugReauthDone)
+				defer c.conn.Close() // causes recv loop to EOF/exit
+				defer wg.Done()
+
+				if err := c.resendZkAuthFn(ctx, c); err != nil {
+					c.logger.Printf("error in resending auth creds: %v", err)
+					return
 				}
-				err := c.sendLoop()
-				if err != nil || c.logInfo {
-					c.logger.Printf("send loop terminated: err=%v", err)
+
+				if err := c.sendLoop(); err != nil || c.logInfo {
+					c.logger.Printf("send loop terminated: %v", err)
 				}
-				c.conn.Close() // causes recv loop to EOF/exit
-				wg.Done()
 			}()
 
 			wg.Add(1)
 			go func() {
+				defer close(c.closeChan) // tell send loop to exit
+				defer wg.Done()
+
 				var err error
 				if c.debugCloseRecvLoop {
 					err = errors.New("DEBUG: close recv loop")
@@ -524,16 +479,12 @@ func (c *Conn) loop() {
 					err = c.recvLoop(c.conn)
 				}
 				if err != io.EOF || c.logInfo {
-					c.logger.Printf("recv loop terminated: err=%v", err)
+					c.logger.Printf("recv loop terminated: %v", err)
 				}
 				if err == nil {
 					panic("zk: recvLoop should never return nil error")
 				}
-				close(c.closeChan) // tell send loop to exit
-				wg.Done()
 			}()
-
-			c.resendZkAuth(reauthChan)
 
 			c.sendSetWatches()
 			wg.Wait()
@@ -674,7 +625,7 @@ func (c *Conn) sendSetWatches() {
 		for _, req := range reqs {
 			_, err := c.request(opSetWatches, req, res, nil)
 			if err != nil {
-				c.logger.Printf("Failed to set previous watches: %s", err.Error())
+				c.logger.Printf("Failed to set previous watches: %v", err)
 				break
 			}
 		}
@@ -1323,4 +1274,63 @@ func (c *Conn) Server() string {
 	c.serverMu.Lock()
 	defer c.serverMu.Unlock()
 	return c.server
+}
+
+func resendZkAuth(ctx context.Context, c *Conn) error {
+	shouldCancel := func() bool {
+		select {
+		case <-c.shouldQuit:
+			return true
+		case <-c.closeChan:
+			return true
+		default:
+			return false
+		}
+	}
+
+	c.credsMu.Lock()
+	defer c.credsMu.Unlock()
+
+	if c.logInfo {
+		c.logger.Printf("re-submitting `%d` credentials after reconnect", len(c.creds))
+	}
+
+	for _, cred := range c.creds {
+		// return early befor attempting to send request.
+		if shouldCancel() {
+			return nil
+		}
+		// do not use the public API for auth since it depends on the send/recv loops
+		// that are waiting for this to return
+		resChan, err := c.sendRequest(
+			opSetAuth,
+			&setAuthRequest{Type: 0,
+				Scheme: cred.scheme,
+				Auth:   cred.auth,
+			},
+			&setAuthResponse{},
+			nil, /* recvFunc*/
+		)
+		if err != nil {
+			return fmt.Errorf("failed to send auth request: %v", err)
+		}
+
+		var res response
+		select {
+		case res = <-resChan:
+		case <-c.closeChan:
+			c.logger.Printf("recv closed, cancel re-submitting credentials")
+			return nil
+		case <-c.shouldQuit:
+			c.logger.Printf("should quit, cancel re-submitting credentials")
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if res.err != nil {
+			return fmt.Errorf("failed conneciton setAuth request: %v", res.err)
+		}
+	}
+
+	return nil
 }

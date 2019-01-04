@@ -3,6 +3,7 @@ package zk
 import (
 	"context"
 	"io/ioutil"
+	"sync"
 	"testing"
 	"time"
 )
@@ -39,21 +40,33 @@ func TestRecurringReAuthHang(t *testing.T) {
 	defer cancel()
 
 	waitForSession(ctx, evtC)
-
 	// Add auth.
 	conn.AddAuth("digest", []byte("test:test"))
 
-	currentServer := conn.Server()
+	var reauthCloseOnce sync.Once
+	reauthSig := make(chan struct{}, 1)
+	conn.resendZkAuthFn = func(ctx context.Context, c *Conn) error {
+		// in current implimentation the reauth might be called more than once based on various conditions
+		reauthCloseOnce.Do(func() { close(reauthSig) })
+		return resendZkAuth(ctx, c)
+	}
+
 	conn.debugCloseRecvLoop = true
-	conn.debugReauthDone = make(chan struct{})
+	currentServer := conn.Server()
 	zkC.StopServer(currentServer)
 	// wait connect to new zookeeper.
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	for conn.Server() == currentServer && conn.State() != StateHasSession {
-		time.Sleep(100 * time.Millisecond)
-	}
+	waitForSession(ctx, evtC)
 
-	<-conn.debugReauthDone
+	select {
+	case _, ok := <-reauthSig:
+		if !ok {
+			return // we closed the channel as expected
+		}
+		t.Fatal("reauth testing channel should have been closed")
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 }
