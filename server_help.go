@@ -34,10 +34,24 @@ type TestCluster struct {
 	Servers []TestServer
 }
 
+// TODO: pull this into its own package to allow for better isolation of integration tests vs. unit
+// testing. This should be used on CI systems and local only when needed whereas unit tests should remain
+// fast and not rely on external dependecies.
 func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCluster, error) {
 	if testing.Short() {
 		t.Skip("ZK cluster tests skipped in short case.")
 	}
+
+	if testing.Verbose() {
+		// if testing verbose we just spam the server logs as many issues with tests will have the ZK server
+		// logs have the cause of the failure in it.
+		if stdout == nil {
+			stdout = os.Stderr
+		} else {
+			stdout = io.MultiWriter(stdout, os.Stderr)
+		}
+	}
+
 	tmpPath, err := ioutil.TempDir("", "gozk")
 	requireNoError(t, err, "failed to create tmp dir for test server setup")
 
@@ -53,9 +67,7 @@ func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCl
 
 	for serverN := 0; serverN < size; serverN++ {
 		srvPath := filepath.Join(tmpPath, fmt.Sprintf("srv%d", serverN+1))
-		if err := os.Mkdir(srvPath, 0700); err != nil {
-			requireNoError(t, err, "failed to make server path")
-		}
+		requireNoError(t, os.Mkdir(srvPath, 0700), "failed to make server path")
 
 		port := startPort + serverN*3
 		cfg := ServerConfig{

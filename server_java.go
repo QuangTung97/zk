@@ -65,8 +65,8 @@ func (srv *server) Start() error {
 	srv.cmd = exec.CommandContext(ctx, srv.cmdString, srv.cmdArgs...)
 	srv.cmd.Stdout = srv.stdout
 	srv.cmd.Stderr = srv.stderr
-
 	srv.cmd.Env = srv.cmdEnv
+
 	return srv.cmd.Start()
 }
 

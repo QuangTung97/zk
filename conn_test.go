@@ -1,6 +1,7 @@
 package zk
 
 import (
+	"context"
 	"io/ioutil"
 	"testing"
 	"time"
@@ -32,14 +33,12 @@ func TestRecurringReAuthHang(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	for conn.State() != StateHasSession {
-		time.Sleep(50 * time.Millisecond)
-	}
+	defer conn.Close()
 
-	go func() {
-		for range evtC {
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	waitForSession(ctx, evtC)
 
 	// Add auth.
 	conn.AddAuth("digest", []byte("test:test"))
@@ -49,6 +48,9 @@ func TestRecurringReAuthHang(t *testing.T) {
 	conn.debugReauthDone = make(chan struct{})
 	zkC.StopServer(currentServer)
 	// wait connect to new zookeeper.
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
 	for conn.Server() == currentServer && conn.State() != StateHasSession {
 		time.Sleep(100 * time.Millisecond)
 	}

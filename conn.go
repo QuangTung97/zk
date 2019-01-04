@@ -1281,8 +1281,11 @@ func (c *Conn) Multi(ops ...interface{}) ([]MultiResponse, error) {
 }
 
 // IncrementalReconfig is the zookeeper reconfiguration api that allows adding and removing servers
-// by lists of members.
-// Return the new configuration stats.
+// by lists of members. For more info refer to the ZK documentation.
+//
+// An optional version allows for conditional reconfigurations, -1 ignores the condition.
+//
+// Returns the new configuration znode stat.
 func (c *Conn) IncrementalReconfig(joining, leaving []string, version int64) (*Stat, error) {
 	// TODO: validate the shape of the member string to give early feedback.
 	request := &reconfigRequest{
@@ -1294,9 +1297,12 @@ func (c *Conn) IncrementalReconfig(joining, leaving []string, version int64) (*S
 	return c.internalReconfig(request)
 }
 
-// Reconfig is the non-incremental update functionality for Zookeeper where the list preovided
-// is the entire new member list.
-// the optional version allows for conditional reconfigurations, -1 ignores the condition.
+// Reconfig is the non-incremental update functionality for Zookeeper where the list provided
+// is the entire new member list. For more info refer to the ZK documentation.
+//
+// An optional version allows for conditional reconfigurations, -1 ignores the condition.
+//
+// Returns the new configuration znode stat.
 func (c *Conn) Reconfig(members []string, version int64) (*Stat, error) {
 	request := &reconfigRequest{
 		NewMembers:  []byte(strings.Join(members, ",")),
