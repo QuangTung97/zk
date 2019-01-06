@@ -222,7 +222,8 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	}
 
 	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
-	// TODO: Connect should provide a way to specify a context for the connection
+	// TODO: this context should become to control the goroutines
+	// and connection itself, like use net.DialContext.
 	ctx := context.Background()
 
 	go func() {
@@ -1296,7 +1297,7 @@ func resendZkAuth(ctx context.Context, c *Conn) error {
 	}
 
 	for _, cred := range c.creds {
-		// return early befor attempting to send request.
+		// return early before attempting to send request.
 		if shouldCancel() {
 			return nil
 		}
