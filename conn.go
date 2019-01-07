@@ -222,8 +222,7 @@ func Connect(servers []string, sessionTimeout time.Duration, options ...connOpti
 	}
 
 	conn.setTimeouts(int32(sessionTimeout / time.Millisecond))
-	// TODO: this context should become to control the goroutines
-	// and connection itself, like use net.DialContext.
+	// TODO: This context should be passed in by the caller to be the connection lifecycle context.
 	ctx := context.Background()
 
 	go func() {
