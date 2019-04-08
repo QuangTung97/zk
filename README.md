@@ -1,9 +1,9 @@
 Native Go Zookeeper Client Library
 ===================================
 
-[![GoDoc](https://godoc.org/github.com/samuel/go-zookeeper?status.svg)](https://godoc.org/github.com/samuel/go-zookeeper)
-[![Build Status](https://travis-ci.org/samuel/go-zookeeper.png)](https://travis-ci.org/samuel/go-zookeeper)
-[![Coverage Status](https://coveralls.io/repos/github/samuel/go-zookeeper/badge.svg?branch=master)](https://coveralls.io/github/samuel/go-zookeeper?branch=master)
+[![GoDoc](https://godoc.org/github.com/go-zookeeper/zk?status.svg)](https://godoc.org/github.com/go-zookeeper/zk)
+[![Build Status](https://travis-ci.org/go-zookeeper/zk.png)](https://travis-ci.org/go-zookeeper/zk)
+[![Coverage Status](https://coveralls.io/repos/github/go-zookeeper/zk/badge.svg?branch=master)](https://coveralls.io/github/go-zookeeper/zk?branch=master)
 
 License
 -------
