@@ -308,20 +308,20 @@ func TestAuth(t *testing.T) {
 		t.Fatalf("Create returned different path '%s' != '%s'", p, path)
 	}
 
-	if a, stat, err := zk.GetACL(path); err != nil {
-		t.Fatalf("GetACL returned error %+v", err)
-	} else if stat == nil {
-		t.Fatalf("GetACL returned nil Stat")
-	} else if len(a) != 1 || acl[0] != a[0] {
-		t.Fatalf("GetACL mismatch expected %+v instead of %+v", acl, a)
-	}
-
 	if _, _, err := zk.Get(path); err != ErrNoAuth {
 		t.Fatalf("Get returned error %+v instead of ErrNoAuth", err)
 	}
 
 	if err := zk.AddAuth("digest", []byte("user:password")); err != nil {
 		t.Fatalf("AddAuth returned error %+v", err)
+	}
+
+	if a, stat, err := zk.GetACL(path); err != nil {
+		t.Fatalf("GetACL returned error %+v", err)
+	} else if stat == nil {
+		t.Fatalf("GetACL returned nil Stat")
+	} else if len(a) != 1 || acl[0] != a[0] {
+		t.Fatalf("GetACL mismatch expected %+v instead of %+v", acl, a)
 	}
 
 	if data, stat, err := zk.Get(path); err != nil {

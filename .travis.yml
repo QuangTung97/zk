@@ -13,7 +13,7 @@ branches:
 
 before_install:
   - wget http://apache.cs.utah.edu/zookeeper/zookeeper-${zk_version}/zookeeper-${zk_version}.tar.gz
-  - tar -zxvf zookeeper*tar.gz && zip -d zookeeper-${zk_version}/contrib/fatjar/zookeeper-${zk_version}-fatjar.jar 'META-INF/*.SF' 'META-INF/*.DSA'
+  - tar -zxvf zookeeper*tar.gz && zip -d zookeeper-${zk_version}/zookeeper-contrib/zookeeper-contrib-fatjar/zookeeper-${zk_version}-fatjar.jar 'META-INF/*.SF' 'META-INF/*.DSA'
   - go get github.com/mattn/goveralls
   - go get golang.org/x/tools/cmd/cover
 
@@ -30,4 +30,4 @@ env:
   global:
     secure: Coha3DDcXmsekrHCZlKvRAc+pMBaQU1QS/3++3YCCUXVDBWgVsC1ZIc9df4RLdZ/ncGd86eoRq/S+zyn1XbnqK5+ePqwJoUnJ59BE8ZyHLWI9ajVn3fND1MTduu/ksGsS79+IYbdVI5wgjSgjD3Ktp6Y5uPl+BPosjYBGdNcHS4=
   matrix:
-    - zk_version=3.4.10
+    - zk_version=3.4.14
