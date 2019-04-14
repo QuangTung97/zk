@@ -94,7 +94,7 @@ func (s State) String() string {
 	if name := stateNames[s]; name != "" {
 		return name
 	}
-	return "unknown state"
+	return "Unknown"
 }
 
 type ErrCode int32
@@ -144,7 +144,7 @@ func (e ErrCode) toError() error {
 	if err, ok := errCodeToError[e]; ok {
 		return err
 	}
-	return errors.New(fmt.Sprintf("unknown error: %v", e))
+	return fmt.Errorf("unknown error: %v", e)
 }
 
 const (
