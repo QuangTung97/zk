@@ -1,7 +1,7 @@
 language: go
 go:
+  - "1.x"
   - 1.11
-  - 1.9
   - tip
 
 go_import_path: github.com/samuel/go-zookeeper
@@ -22,7 +22,7 @@ before_script:
   - make lint
 
 script:
-  - jdk_switcher use oraclejdk9
+  - jdk_switcher use oraclejdk9 || true
   - make
 
 matrix:
