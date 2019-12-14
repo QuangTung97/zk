@@ -25,13 +25,8 @@ zookeeper: $(ZK)
 	# in the test code. this allows backward compatable testing.
 	ln -s $(ZK) zookeeper
 
-.PHONY: install-covertools
-install-covertools:
-	go get github.com/mattn/goveralls
-	go get golang.org/x/tools/cmd/cover
-
 .PHONY: setup
-setup: zookeeper install-covertools
+setup: zookeeper
 
 .PHONY: lint
 lint:
@@ -45,8 +40,6 @@ build:
 .PHONY: test
 test: build zookeeper
 	go test -timeout 500s -v -race -covermode atomic -coverprofile=profile.cov $(PACKAGES)
-	# ignore if we fail to publish coverage
-	-goveralls -coverprofile=profile.cov -service=travis-ci
 
 .PHONY: clean
 clean:
