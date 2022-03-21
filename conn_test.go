@@ -57,6 +57,36 @@ func TestRecurringReAuthHang(t *testing.T) {
 	}
 }
 
+func TestConcurrentReadAndClose(t *testing.T) {
+	WithListenServer(t, func(server string) {
+		conn, _, err := Connect([]string{server}, 15*time.Second)
+		if err != nil {
+			t.Fatalf("Failed to create Connection %s", err)
+		}
+
+		okChan := make(chan struct{})
+		var setErr error
+		go func() {
+			_, setErr = conn.Create("/test-path", []byte("test data"), 0, WorldACL(PermAll))
+			close(okChan)
+		}()
+
+		go func() {
+			time.Sleep(1 * time.Second)
+			conn.Close()
+		}()
+
+		select {
+		case <-okChan:
+			if setErr != ErrConnectionClosed {
+				t.Fatalf("unexpected error returned from Set %v", setErr)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("apparent deadlock!")
+		}
+	})
+}
+
 func TestDeadlockInClose(t *testing.T) {
 	c := &Conn{
 		shouldQuit:     make(chan struct{}),

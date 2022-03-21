@@ -929,8 +929,10 @@ func (c *Conn) queueRequest(opcode int32, req interface{}, res interface{}, recv
 }
 
 func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc func(*request, *responseHeader, error)) (int64, error) {
-	r := <-c.queueRequest(opcode, req, res, recvFunc)
+	recv := c.queueRequest(opcode, req, res, recvFunc)
 	select {
+	case r := <-recv:
+		return r.zxid, r.err
 	case <-c.shouldQuit:
 		// queueRequest() can be racy, double-check for the race here and avoid
 		// a potential data-race. otherwise the client of this func may try to
@@ -938,8 +940,6 @@ func (c *Conn) request(opcode int32, req interface{}, res interface{}, recvFunc 
 		// NOTE: callers of this func should check for (at least) ErrConnectionClosed
 		// and avoid accessing fields of the response object if such error is present.
 		return -1, ErrConnectionClosed
-	default:
-		return r.zxid, r.err
 	}
 }
 
