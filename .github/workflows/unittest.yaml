@@ -6,11 +6,11 @@ jobs:
     name: unittest
     strategy:
       matrix:
-        go-version: [1.13.x, 1.14.x, stable]
+        go-version: ['1.13.x', '1.14.x', 'stable']
     runs-on: ubuntu-latest
     steps:
       - name: Go ${{ matrix.go }} setup
-        uses: actions/setup-go@v1
+        uses: actions/setup-go@v4
         with:
             go-version: ${{ matrix.go-version }} 
 
