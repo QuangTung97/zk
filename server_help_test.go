@@ -38,6 +38,8 @@ type TestCluster struct {
 // testing. This should be used on CI systems and local only when needed whereas unit tests should remain
 // fast and not rely on external dependencies.
 func StartTestCluster(t *testing.T, size int, stdout, stderr io.Writer) (*TestCluster, error) {
+	t.Helper()
+
 	if testing.Short() {
 		t.Skip("ZK cluster tests skipped in short case.")
 	}
