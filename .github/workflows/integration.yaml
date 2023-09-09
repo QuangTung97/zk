@@ -18,6 +18,7 @@ jobs:
       - name: Setup Java 14
         uses: actions/setup-java@v3
         with:
+          distribution: 'oracle'
           java-version: 14
 
       - name: Checkout code
