@@ -139,4 +139,22 @@ func TestEncode(t *testing.T) {
 		}
 		testEncodeDecode[pingResponse](t, pingResponse{}, data)
 	})
+
+	t.Run("connect response", func(t *testing.T) {
+		req := connectResponse{
+			ProtocolVersion: protocolVersion,
+			TimeOut:         2000,
+			SessionID:       41,
+			Passwd:          []byte("pass01"),
+		}
+		cmpData := []byte{
+			0, 0, 0, 26,
+			0, 0, 0, 0, // protocol
+			0, 0, 2000 / 256, 2000 % 256, // timeout
+			0, 0, 0, 0, 0, 0, 0, 41, // session id
+			0, 0, 0, 6, // password len
+			'p', 'a', 's', 's', '0', '1',
+		}
+		testEncodeDecode[connectResponse](t, req, cmpData)
+	})
 }
