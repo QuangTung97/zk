@@ -76,6 +76,8 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 	c := &Client{
 		state:  StateDisconnected,
 		passwd: emptyPassword,
+
+		recvMap: map[int32]clientRequest{},
 	}
 
 	c.sendCond = sync.NewCond(&c.mut)
