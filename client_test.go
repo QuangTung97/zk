@@ -14,13 +14,13 @@ import (
 
 func TestNewClient_Validate(t *testing.T) {
 	t.Run("empty servers", func(t *testing.T) {
-		client, err := NewClient(nil, 0)
+		client, err := newClientInternal(nil, 0)
 		assert.Equal(t, errors.New("zk: server list must not be empty"), err)
 		assert.Nil(t, client)
 	})
 
 	t.Run("timeout too small", func(t *testing.T) {
-		client, err := NewClient([]string{"localhost"}, 0)
+		client, err := newClientInternal([]string{"localhost"}, 0)
 		assert.Equal(t, errors.New("zk: session timeout must not be too small"), err)
 		assert.Nil(t, client)
 	})
@@ -71,7 +71,7 @@ type clientTest struct {
 }
 
 func newClientTest(_ *testing.T) *clientTest {
-	c, err := NewClient([]string{"server01"}, 6*time.Second)
+	c, err := newClientInternal([]string{"server01"}, 6*time.Second)
 	if err != nil {
 		panic(err)
 	}
@@ -107,7 +107,7 @@ func (c *clientTest) doAuthenticate() {
 
 func TestClient_Authenticate(t *testing.T) {
 	t.Run("check init state", func(t *testing.T) {
-		c, err := NewClient([]string{"server01"}, 6*time.Second)
+		c, err := newClientInternal([]string{"server01"}, 6*time.Second)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, StateDisconnected, c.state)
 		assert.Equal(t, []byte{
@@ -291,13 +291,13 @@ func TestClient_RecvData(t *testing.T) {
 
 		c.conn.readBuf.Write(buf[:4+n1+n2])
 
-		err := c.client.readSingleData(c.conn)
-		assert.Equal(t, nil, err)
+		c.client.readSingleData(c.conn)
 
 		// Check Handle Queue
 		assert.Equal(t, 1, len(c.client.handleQueue))
 		assert.Equal(t, handleEvent{
 			state: StateHasSession,
+			zxid:  71,
 			req: clientRequest{
 				xid:     xid1,
 				opcode:  opCreate,

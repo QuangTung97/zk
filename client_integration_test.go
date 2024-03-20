@@ -33,7 +33,7 @@ func (c *tcpConnTest) SetWriteDeadline(d time.Duration) error {
 
 func TestClientIntegration_Authenticate(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		c, err := NewClient([]string{"localhost"}, 12*time.Second)
+		c, err := newClientInternal([]string{"localhost"}, 12*time.Second)
 		assert.Equal(t, nil, err)
 
 		netConn, err := net.Dial("tcp", "localhost:2181")
@@ -62,15 +62,12 @@ func (c *tcpConnTest) closeSession(client *Client) {
 		panic(err)
 	}
 
-	err = client.readSingleData(c)
-	if err != nil {
-		panic(err)
-	}
+	client.readSingleData(c)
 }
 
 func TestClientIntegration_Authenticate_And_Create(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		c, err := NewClient([]string{"localhost"}, 12*time.Second)
+		c, err := newClientInternal([]string{"localhost"}, 12*time.Second)
 		assert.Equal(t, nil, err)
 
 		netConn, err := net.Dial("tcp", "localhost:2181")
@@ -103,9 +100,10 @@ func TestClientIntegration_Authenticate_And_Create(t *testing.T) {
 		assert.Equal(t, nil, err)
 
 		// Recv Response
-		err = c.readSingleData(connTest)
-		assert.Equal(t, nil, err)
+		c.readSingleData(connTest)
 		assert.Equal(t, 1, len(c.handleQueue))
+
+		c.handleQueue[0].zxid = 0
 		assert.Equal(t, handleEvent{
 			state: StateHasSession,
 			req: clientRequest{
