@@ -1,6 +1,10 @@
 package zk
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestFormatServers(t *testing.T) {
 	t.Parallel()
@@ -11,6 +15,54 @@ func TestFormatServers(t *testing.T) {
 			t.Errorf("%v should equal %v", s, r[i])
 		}
 	}
+}
+
+func TestACLConsts(t *testing.T) {
+	t.Run("world", func(t *testing.T) {
+		assert.Equal(t, []ACL{
+			{
+				Perms:  31,
+				Scheme: "world",
+				ID:     "anyone",
+			},
+		}, WorldACL(PermAll))
+
+		assert.Equal(t, []ACL{
+			{
+				Perms:  31,
+				Scheme: "world",
+				ID:     "anyone",
+			},
+		}, WorldACL(PermRead|PermWrite|PermCreate|PermDelete|PermAdmin))
+	})
+
+	t.Run("", func(t *testing.T) {
+
+	})
+}
+
+func TestFormatServers_Ex2(t *testing.T) {
+	t.Run("without port", func(t *testing.T) {
+		assert.Equal(t, []string{
+			"localhost:2181",
+		}, FormatServers([]string{"localhost"}))
+	})
+
+	t.Run("with port", func(t *testing.T) {
+		assert.Equal(t, []string{
+			"localhost:1221",
+		}, FormatServers([]string{"localhost:1221"}))
+	})
+
+	t.Run("multi", func(t *testing.T) {
+		assert.Equal(t, []string{
+			"localhost:1234",
+			"localhost:2181",
+		}, FormatServers([]string{
+			"localhost:1234",
+			"localhost",
+		}))
+	})
 }
 
 func TestValidatePath(t *testing.T) {
