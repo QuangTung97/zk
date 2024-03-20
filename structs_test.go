@@ -120,7 +120,7 @@ func TestEncode(t *testing.T) {
 			0, 0, 0, 0, 0, 0, 0, 123, // last zxid seen
 			0, 0, 2000 / 256, 2000 % 256, // timeout
 			0, 0, 0, 0, 0, 0, 0, 41, // session id
-			0, 0, 0, 6,
+			0, 0, 0, 6, // password len
 			'p', 'a', 's', 's', '0', '1',
 		}
 		testEncodeDecode[connectRequest](t, req, cmpData)

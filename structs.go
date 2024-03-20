@@ -649,7 +649,7 @@ func encodeObject[T any](obj *T, codecBuf *codecBuffer, w io.Writer) (int, error
 }
 
 type codecBuffer struct {
-	buf [1 << 20]byte
+	buf [bufferSize]byte
 }
 
 func decodeObject[T any](resp *T, codecBuf *codecBuffer, r io.Reader) error {
