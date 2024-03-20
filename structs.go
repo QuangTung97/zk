@@ -3,6 +3,7 @@ package zk
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"log"
 	"reflect"
 	"runtime"
@@ -563,7 +564,7 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	case reflect.String:
 		str := v.String()
 		binary.BigEndian.PutUint32(buf[n:n+4], uint32(len(str)))
-		copy(buf[n+4:n+4+len(str)], []byte(str))
+		copy(buf[n+4:n+4+len(str)], str)
 		n += 4 + len(str)
 	case reflect.Slice:
 		switch v.Type().Elem().Kind() {
@@ -636,4 +637,34 @@ func requestStructForOp(op int32) interface{} {
 		return &reconfigRequest{}
 	}
 	return nil
+}
+
+func encodeObject[T any](obj *T, codecBuf *codecBuffer, w io.Writer) (int, error) {
+	n, err := encodePacket(codecBuf.buf[4:], obj)
+	if err != nil {
+		panic(err)
+	}
+	binary.BigEndian.PutUint32(codecBuf.buf[:4], uint32(n))
+	return w.Write(codecBuf.buf[:n+4])
+}
+
+type codecBuffer struct {
+	buf [1 << 20]byte
+}
+
+func decodeObject[T any](resp *T, codecBuf *codecBuffer, r io.Reader) error {
+	var buf [4]byte
+	_, err := io.ReadFull(r, buf[:])
+	if err != nil {
+		return err
+	}
+
+	objLen := int(binary.BigEndian.Uint32(buf[:4]))
+	_, err = io.ReadFull(r, codecBuf.buf[:objLen])
+	if err != nil {
+		return err
+	}
+
+	_, err = decodePacket(codecBuf.buf[:objLen], resp)
+	return err
 }

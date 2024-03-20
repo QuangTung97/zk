@@ -1,8 +1,11 @@
 package zk
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEncodeDecodePacket(t *testing.T) {
@@ -81,4 +84,39 @@ func BenchmarkEncode(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestEncode(t *testing.T) {
+	t.Run("connect", func(t *testing.T) {
+		var codec codecBuffer
+		var buf bytes.Buffer
+
+		req := &connectRequest{
+			ProtocolVersion: protocolVersion,
+			LastZxidSeen:    123,
+			TimeOut:         2000,
+			SessionID:       41,
+			Passwd:          []byte("pass01"),
+		}
+
+		n, err := encodeObject[connectRequest](req, &codec, &buf)
+		assert.Equal(t, nil, err)
+
+		assert.Equal(t, 0x22+4, n)
+		assert.Equal(t, []byte{
+			0, 0, 0, 0x22,
+			0, 0, 0, 0, // protocol
+			0, 0, 0, 0, 0, 0, 0, 123, // last zxid seen
+			0, 0, 2000 / 256, 2000 % 256, // timeout
+			0, 0, 0, 0, 0, 0, 0, 41, // session id
+			0, 0, 0, 6,
+			'p', 'a', 's', 's', '0', '1',
+		}, buf.Bytes())
+
+		// Decode
+		var newReq connectRequest
+		err = decodeObject[connectRequest](&newReq, &codec, &buf)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, *req, newReq)
+	})
 }

@@ -2,13 +2,11 @@ package zk
 
 import (
 	"errors"
-	"math/rand"
 	"time"
 )
 
 // Client ...
 type Client struct {
-	randSrc rand.Source
 }
 
 // Option ...
