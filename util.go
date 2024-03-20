@@ -57,6 +57,14 @@ func stringShuffle(s []string) {
 	}
 }
 
+// stringShuffleRand performs a Fisher-Yates shuffle on a slice of strings
+func stringShuffleRand(s []string, r *rand.Rand) {
+	for i := len(s) - 1; i > 0; i-- {
+		j := r.Intn(i + 1)
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
 // validatePath will make sure a path is valid before sending the request
 func validatePath(path string, isSequential bool) error {
 	if path == "" {

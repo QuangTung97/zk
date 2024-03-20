@@ -1,21 +1,11 @@
 package zk
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
-
-func TestFormatServers(t *testing.T) {
-	t.Parallel()
-	servers := []string{"127.0.0.1:2181", "127.0.0.42", "127.0.42.1:8811"}
-	r := []string{"127.0.0.1:2181", "127.0.0.42:2181", "127.0.42.1:8811"}
-	for i, s := range FormatServers(servers) {
-		if s != r[i] {
-			t.Errorf("%v should equal %v", s, r[i])
-		}
-	}
-}
 
 func TestACLConsts(t *testing.T) {
 	t.Run("world", func(t *testing.T) {
@@ -36,12 +26,28 @@ func TestACLConsts(t *testing.T) {
 		}, WorldACL(PermRead|PermWrite|PermCreate|PermDelete|PermAdmin))
 	})
 
-	t.Run("", func(t *testing.T) {
+	t.Run("auth", func(t *testing.T) {
+		assert.Equal(t, []ACL{
+			{
+				Perms:  1,
+				Scheme: "auth",
+				ID:     "",
+			},
+		}, AuthACL(PermRead))
+	})
 
+	t.Run("digest", func(t *testing.T) {
+		assert.Equal(t, []ACL{
+			{
+				Perms:  31,
+				Scheme: "digest",
+				ID:     "user01:xOvH6JR5ZbRiGoGVEnAfhLL1vZA=",
+			},
+		}, DigestACL(PermAll, "user01", "password01"))
 	})
 }
 
-func TestFormatServers_Ex2(t *testing.T) {
+func TestFormatServers(t *testing.T) {
 	t.Run("without port", func(t *testing.T) {
 		assert.Equal(t, []string{
 			"localhost:2181",
@@ -58,11 +64,22 @@ func TestFormatServers_Ex2(t *testing.T) {
 		assert.Equal(t, []string{
 			"localhost:1234",
 			"localhost:2181",
+			"123.0.8.1:2345",
+			"123.1.9.1:2181",
 		}, FormatServers([]string{
 			"localhost:1234",
 			"localhost",
+			"123.0.8.1:2345",
+			"123.1.9.1",
 		}))
 	})
+}
+
+func TestStringShuffle(t *testing.T) {
+	r := rand.New(rand.NewSource(3210))
+	arr := []string{"a", "b", "c", "d"}
+	stringShuffleRand(arr, r)
+	assert.Equal(t, []string{"b", "d", "c", "a"}, arr)
 }
 
 func TestValidatePath(t *testing.T) {
