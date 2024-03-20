@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math"
 	"testing"
 	"time"
 
@@ -22,6 +23,18 @@ func TestNewClient_Validate(t *testing.T) {
 		assert.Equal(t, errors.New("zk: session timeout must not be too small"), err)
 		assert.Nil(t, client)
 	})
+}
+
+func TestClient_NextXID(t *testing.T) {
+	c := &Client{nextXidValue: 12}
+	assert.Equal(t, int32(13), c.nextXid())
+
+	// wrap around
+	c = &Client{nextXidValue: math.MaxInt32}
+	assert.Equal(t, int32(0), c.nextXid())
+
+	c = &Client{nextXidValue: math.MaxInt32 - 1}
+	assert.Equal(t, int32(math.MaxInt32), c.nextXid())
 }
 
 type connMock struct {

@@ -4,13 +4,14 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // Client ...
 type Client struct {
 	// =================================
-	// protecting following fields
+	// protect following fields
 	// =================================
 	mut sync.Mutex
 
@@ -26,11 +27,38 @@ type Client struct {
 	lastZxid         int64
 	sessionTimeoutMs int32
 	sessionID        int64
+
+	sendQueue []clientRequest
+	sendCond  *sync.Cond
+
+	recvQueue []clientRequest
+	recvCond  *sync.Cond
+
+	handleQueue []handleEvent
+	handleCond  *sync.Cond
+
 	// =================================
+
+	// not need to protect by mutex
+	nextXidValue uint32
 }
 
 // Option ...
 type Option func(c *Client)
+
+type clientRequest struct {
+	xid      int32
+	opcode   int32
+	request  any
+	response any
+
+	callback func(res any, header *responseHeader, err error)
+}
+
+type handleEvent struct {
+	state State
+	req   clientRequest
+}
 
 // NewClient ...
 func NewClient(servers []string, sessionTimeout time.Duration, options ...Option) (*Client, error) {
@@ -47,6 +75,10 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 		state:  StateDisconnected,
 		passwd: emptyPassword,
 	}
+
+	c.sendCond = sync.NewCond(&c.mut)
+	c.recvCond = sync.NewCond(&c.mut)
+	c.handleCond = sync.NewCond(&c.mut)
 
 	c.setTimeouts(int32(sessionTimeout / time.Millisecond))
 
@@ -75,6 +107,10 @@ func (c *Client) setTimeouts(sessionTimeoutMs int32) {
 	sessionTimeout := time.Duration(sessionTimeoutMs) * time.Millisecond
 	c.recvTimeout = sessionTimeout * 2 / 3
 	c.pingInterval = c.recvTimeout / 2
+}
+
+func (c *Client) nextXid() int32 {
+	return int32(atomic.AddUint32(&c.nextXidValue, 1) & 0x7fffffff)
 }
 
 func (c *Client) authenticate(conn tcpConn) error {
@@ -125,4 +161,22 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.mut.Unlock()
 
 	return nil
+}
+
+func (c *Client) enqueueRequest(
+	opCode int32, request any, response any,
+	callback func(resp any, header *responseHeader, err error),
+) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	if c.state == StateHasSession {
+		c.sendQueue = append(c.sendQueue, clientRequest{
+			xid:      c.nextXid(),
+			opcode:   opCode,
+			request:  request,
+			response: response,
+
+			callback: callback,
+		})
+	}
 }
