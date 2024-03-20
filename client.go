@@ -1,8 +1,10 @@
 package zk
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,13 +12,13 @@ import (
 
 // Client ...
 type Client struct {
+	writeCodec codecBuffer // not need to lock
+	readCodec  codecBuffer // not need to lock
+
 	// =================================
 	// protect following fields
 	// =================================
 	mut sync.Mutex
-
-	writeCodec codecBuffer
-	readCodec  codecBuffer
 
 	passwd       []byte
 	recvTimeout  time.Duration
@@ -31,15 +33,14 @@ type Client struct {
 	sendQueue []clientRequest
 	sendCond  *sync.Cond
 
-	recvQueue []clientRequest
-	recvCond  *sync.Cond
+	recvMap  map[int32]clientRequest
+	recvCond *sync.Cond
 
 	handleQueue []handleEvent
 	handleCond  *sync.Cond
-
 	// =================================
 
-	// not need to protect by mutex
+	// not need to lock by mutex
 	nextXidValue uint32
 }
 
@@ -57,6 +58,7 @@ type clientRequest struct {
 
 type handleEvent struct {
 	state State
+	err   error
 	req   clientRequest
 }
 
@@ -169,14 +171,159 @@ func (c *Client) enqueueRequest(
 ) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
-	if c.state == StateHasSession {
-		c.sendQueue = append(c.sendQueue, clientRequest{
-			xid:      c.nextXid(),
-			opcode:   opCode,
-			request:  request,
-			response: response,
 
-			callback: callback,
-		})
+	req := clientRequest{
+		xid:      c.nextXid(),
+		opcode:   opCode,
+		request:  request,
+		response: response,
+
+		callback: callback,
 	}
+
+	if c.state == StateHasSession {
+		c.sendQueue = append(c.sendQueue, req)
+		c.sendCond.Signal()
+		return
+	}
+
+	c.handleQueue = append(c.handleQueue, handleEvent{
+		state: c.state,
+		req:   req,
+	})
+	c.handleCond.Signal()
+}
+
+func (c *Client) sendData(conn tcpConn, req clientRequest) error {
+	c.mut.Lock()
+	// TODO Check Closed
+	c.recvMap[req.xid] = req
+	c.recvCond.Signal()
+	c.mut.Unlock()
+
+	header := &requestHeader{req.xid, req.opcode}
+	buf := c.writeCodec.buf[:]
+
+	// encode header
+	n, err := encodePacket(buf[4:], header)
+	if err != nil {
+		// TODO Handle Encode Error
+		return nil
+	}
+
+	// encode request object
+	n2, err := encodePacket(buf[4+n:], req.request)
+	if err != nil {
+		// TODO Handle Encode Error
+		return nil
+	}
+
+	n += n2
+
+	// write length to the first 4 bytes
+	binary.BigEndian.PutUint32(buf[:4], uint32(n))
+
+	_ = conn.SetWriteDeadline(c.recvTimeout)
+	_, err = conn.Write(buf[:n+4])
+	_ = conn.SetWriteDeadline(0)
+	if err != nil {
+		// TODO Handle Connection Error
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) readSingleData(conn tcpConn) error {
+	buf := c.readCodec.buf
+
+	// read package length
+	_ = conn.SetReadDeadline(c.recvTimeout)
+	_, err := io.ReadFull(conn, buf[:4])
+	_ = conn.SetReadDeadline(0)
+	if err != nil {
+		// TODO check error
+		return err
+	}
+
+	blen := int(binary.BigEndian.Uint32(buf[:4]))
+	if len(buf) < blen {
+		// TODO Handle Len too Long
+	}
+
+	_ = conn.SetReadDeadline(c.recvTimeout)
+	_, err = io.ReadFull(conn, buf[:blen])
+	_ = conn.SetReadDeadline(0)
+	if err != nil {
+		// TODO Handle Error
+		return err
+	}
+
+	res := responseHeader{}
+	_, err = decodePacket(buf[:16], &res)
+	if err != nil {
+		// TODO Handle Error
+		return err
+	}
+
+	if res.Xid == -1 {
+		// TODO Handle Watch Event
+		//res := &watcherEvent{}
+		//_, err = decodePacket(buf[16:blen], res)
+		//if err != nil {
+		//	return err
+		//}
+		//ev := Event{
+		//	Type:  res.Type,
+		//	State: res.State,
+		//	Path:  res.Path,
+		//	Err:   nil,
+		//}
+		//c.sendEvent(ev)
+		//c.notifyWatches(ev)
+		return nil
+	}
+	if res.Xid == -2 {
+		// Ping response. Ignore.
+		return nil
+	}
+
+	if res.Xid < 0 {
+		log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+		return nil
+	}
+
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	if res.Zxid > 0 {
+		c.lastZxid = res.Zxid
+	}
+
+	req, ok := c.recvMap[res.Xid]
+	if ok {
+		delete(c.recvMap, res.Xid)
+	}
+
+	if !ok {
+		log.Printf("Response for unknown request with xid %d", res.Xid)
+		return nil
+	}
+
+	c.mut.Unlock()
+	if res.Err != 0 {
+		err = res.Err.toError()
+	} else {
+		_, err = decodePacket(buf[16:blen], req.response)
+	}
+	c.mut.Lock()
+
+	c.handleQueue = append(c.handleQueue, handleEvent{
+		state: c.state,
+		req:   req,
+		err:   err,
+	})
+	c.handleCond.Signal()
+
+	return nil
 }
