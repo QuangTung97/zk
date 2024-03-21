@@ -488,6 +488,120 @@ func TestClient_Create_And_Get(t *testing.T) {
 			ErrBadVersion,
 		}, setErrs)
 	})
+
+	t.Run("get data with watch node deleted by session expired", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		var getEvent Event
+		c.Get("/workers01",
+			func(resp GetResponse, err error) {
+				steps = append(steps, "get-data")
+			}, WithGetWatch(func(ev Event) {
+				steps = append(steps, "get-event")
+				getEvent = ev
+			}),
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-workers01",
+			"get-data",
+			"get-event",
+		}, steps)
+
+		assert.Equal(t, Event{
+			Type:  EventNodeDeleted,
+			State: 3,
+			Path:  "/workers01",
+		}, getEvent)
+	})
+
+	t.Run("get children with watch node deleted by session expired", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		var childrenEvent Event
+		c.Children("/workers01",
+			func(resp ChildrenResponse, err error) {
+				steps = append(steps, "children-data")
+			}, WithChildrenWatch(func(ev Event) {
+				steps = append(steps, "children-event")
+				childrenEvent = ev
+			}),
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-workers01",
+			"children-data",
+			"children-event",
+		}, steps)
+
+		assert.Equal(t, Event{
+			Type:  EventNodeDeleted,
+			State: 3,
+			Path:  "/workers01",
+		}, childrenEvent)
+	})
+
+	t.Run("children watch root and child node deleted by session expired", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		var childrenEvent Event
+		c.Children("/",
+			func(resp ChildrenResponse, err error) {
+				steps = append(steps, "children-data")
+			}, WithChildrenWatch(func(ev Event) {
+				steps = append(steps, "children-event")
+				childrenEvent = ev
+			}),
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-workers01",
+			"children-data",
+			"children-event",
+		}, steps)
+
+		assert.Equal(t, Event{
+			Type:  EventNodeChildrenChanged,
+			State: 3,
+			Path:  "/",
+		}, childrenEvent)
+	})
 }
 
 func checkStat(t *testing.T, st *Stat) {
