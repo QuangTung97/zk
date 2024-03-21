@@ -808,3 +808,33 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		}, steps)
 	})
 }
+
+func TestClientInternal_WithSessionExpired(t *testing.T) {
+	t.Run("session not expired because of reconnect", func(t *testing.T) {
+		t.Skip()
+
+		ch := make(chan struct{}, 1)
+
+		var calls int
+
+		c, err := NewClient([]string{"localhost"}, 4*time.Second,
+			WithSessionEstablishedCallback(func() {
+				calls++
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
+			}),
+		)
+		if err != nil {
+			panic(err)
+		}
+		<-ch
+
+		time.Sleep(8 * time.Second)
+
+		c.Close()
+
+		assert.Equal(t, 1, calls)
+	})
+}

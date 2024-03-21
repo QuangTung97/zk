@@ -70,6 +70,7 @@ type Client struct {
 	sendQueue    []clientRequest
 	sendCond     *sync.Cond
 	sendShutdown bool
+	sendSema     int
 
 	recvMap      map[int32]clientRequest
 	recvCond     *sync.Cond
@@ -197,6 +198,11 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 			}
 			c.sendQueue = nil
 			return requests, true
+		}
+
+		if c.sendSema > 0 {
+			c.sendSema = 0
+			return nil, true
 		}
 
 		if c.sendShutdown {
@@ -433,11 +439,12 @@ func (c *Client) authenticate(conn tcpConn) error {
 	}
 
 	c.mut.Lock()
+	prevIsZero := c.sessionID == 0
 	c.sessionID = r.SessionID
 	c.setTimeouts(r.TimeOut)
 	c.passwd = r.Passwd
 	c.state = StateHasSession
-	if c.sessEstablishedCallback != nil {
+	if c.sessEstablishedCallback != nil && prevIsZero {
 		c.handleQueue = append(c.handleQueue, handleEvent{
 			state: StateHasSession,
 			req: clientRequest{
@@ -587,6 +594,9 @@ func (c *Client) updateStateAndFlushRequests(finalState State) bool {
 
 	c.handleQueue = append(c.handleQueue, events...)
 	c.handleCond.Signal()
+
+	c.sendSema++
+	c.sendCond.Signal()
 
 	return true
 }
