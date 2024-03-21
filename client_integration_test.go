@@ -74,14 +74,20 @@ func (c *tcpConnTest) closeSession(client *Client) {
 	client.readSingleData(c)
 }
 
-func mustNewClient(_ *testing.T) *Client {
-	ch := make(chan struct{})
-	c, err := NewClient(
-		[]string{"localhost"}, 30*time.Second,
+func mustNewClient(_ *testing.T, inputOptions ...Option) *Client {
+	ch := make(chan struct{}, 1)
+
+	opts := []Option{
 		WithSessionEstablishedCallback(func() {
-			close(ch)
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
 		}),
-	)
+	}
+	opts = append(opts, inputOptions...)
+
+	c, err := NewClient([]string{"localhost"}, 30*time.Second, opts...)
 	if err != nil {
 		panic(err)
 	}
@@ -119,6 +125,8 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 		assert.Equal(t, CreateResponse{
 			Path: "/workers01",
 		}, createResp)
+
+		assert.Greater(t, c.lastZxid, int64(0))
 	})
 
 	t.Run("get children", func(t *testing.T) {
@@ -742,5 +750,52 @@ func TestClientIntegration_Persistence(t *testing.T) {
 			"job-0000000000",
 			"job-0000000001",
 		}, childrenResp.Children)
+	})
+}
+
+func TestClientIntegration_WithDisconnect(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		c := mustNewClient(t, WithDialRetryDuration(100*time.Millisecond))
+
+		var steps []string
+
+		c.Exists("/workers01",
+			func(resp ExistsResponse, err error) {
+			},
+			WithExistsWatch(func(ev Event) {
+				steps = append(steps, "exists-watch")
+			}),
+		)
+
+		_ = c.conn.Close()
+
+		var createErr error
+		c.Create("/workers01",
+			nil, 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create01")
+				createErr = err
+			},
+		)
+
+		time.Sleep(500 * time.Millisecond)
+		assert.Equal(t, ErrConnectionClosed, createErr)
+
+		c.Create("/workers01",
+			nil, 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create02")
+				createErr = err
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, nil, createErr)
+		assert.Equal(t, []string{
+			"create01",
+			"exists-watch",
+			"create02",
+		}, steps)
 	})
 }

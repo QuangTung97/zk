@@ -41,11 +41,15 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 type Client struct {
 	servers []string
 
+	dialRetryDuration time.Duration
+
 	writeCodec    codecBuffer // not need to lock
 	readCodec     codecBuffer // not need to lock
 	authReadCodec codecBuffer // not need to lock
 
 	sessEstablishedCallback func()
+
+	lastZxid int64
 
 	// =================================
 	// protect following fields
@@ -60,7 +64,6 @@ type Client struct {
 
 	state State
 
-	lastZxid         int64
 	sessionTimeoutMs int32
 	sessionID        int64
 
@@ -90,6 +93,12 @@ type Option func(c *Client)
 func WithSessionEstablishedCallback(callback func()) Option {
 	return func(c *Client) {
 		c.sessEstablishedCallback = callback
+	}
+}
+
+func WithDialRetryDuration(d time.Duration) Option {
+	return func(c *Client) {
+		c.dialRetryDuration = d
 	}
 }
 
@@ -152,6 +161,8 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 
 	c := &Client{
 		servers: servers,
+
+		dialRetryDuration: 2 * time.Second,
 
 		state:  StateDisconnected,
 		passwd: emptyPassword,
@@ -231,16 +242,15 @@ func (c *Client) tryToConnect() tcpConn {
 
 		c.mut.Lock()
 		shutdown := c.sendShutdown
-		c.mut.Unlock()
-
 		if shutdown {
-			c.mut.Lock()
 			c.recvShutdown = true
 			c.recvCond.Signal()
 			c.mut.Unlock()
 			return nil
 		}
-		time.Sleep(1 * time.Second)
+		c.mut.Unlock()
+
+		time.Sleep(c.dialRetryDuration)
 	}
 }
 
@@ -422,8 +432,6 @@ func (c *Client) authenticate(conn tcpConn) error {
 		return ErrSessionExpired
 	}
 
-	// TODO Re-apply watch and auth infos
-
 	c.mut.Lock()
 	c.sessionID = r.SessionID
 	c.setTimeouts(r.TimeOut)
@@ -443,10 +451,39 @@ func (c *Client) authenticate(conn tcpConn) error {
 		c.handleCond.Signal()
 	}
 	c.conn = conn
-	c.recvCond.Signal()
+
+	// TODO Reapply ACL
+	c.reapplyAllWatches()
 	c.mut.Unlock()
 
+	c.recvCond.Signal()
+
 	return nil
+}
+
+func (c *Client) reapplyAllWatches() {
+	if len(c.watchers) == 0 {
+		return
+	}
+
+	req := &setWatchesRequest{
+		RelativeZxid: c.lastZxid,
+	}
+
+	for wpt := range c.watchers {
+		// TODO Other Watches
+		switch wpt.wType {
+		case watchTypeExist:
+			req.ExistWatches = append(req.ExistWatches, wpt.path)
+		default:
+		}
+	}
+
+	c.enqueueAlreadyLocked(
+		opSetWatches, req, &setWatchesResponse{},
+		func(resp any, zxid int64, err error) {},
+		clientWatchRequest{},
+	)
 }
 
 func (c *Client) enqueueRequest(
@@ -573,7 +610,7 @@ func (c *Client) disconnect(conn tcpConn) bool {
 }
 
 func (c *Client) sendData(conn tcpConn, req clientRequest) error {
-	header := &requestHeader{req.xid, req.opcode}
+	header := &requestHeader{Xid: req.xid, Opcode: req.opcode}
 	buf := c.writeCodec.buf[:]
 
 	// encode header
@@ -635,6 +672,10 @@ func (c *Client) readSingleData(conn tcpConn) {
 		return
 	}
 
+	if res.Zxid > 0 {
+		c.lastZxid = res.Zxid
+	}
+
 	if res.Xid == -1 {
 		c.handleWatchEvent(conn, buf[:], blen, res)
 		return
@@ -655,10 +696,6 @@ func (c *Client) readSingleData(conn tcpConn) {
 func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
-
-	if res.Zxid > 0 {
-		c.lastZxid = res.Zxid
-	}
 
 	req, ok := c.recvMap[res.Xid]
 	if ok {
