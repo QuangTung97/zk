@@ -602,6 +602,64 @@ func TestClient_Create_And_Get(t *testing.T) {
 			Path:  "/",
 		}, childrenEvent)
 	})
+
+	t.Run("exists empty", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var existsErr error
+
+		c.Exists("/workers01",
+			func(resp ExistsResponse, err error) {
+				steps = append(steps, "exists-resp")
+				existsErr = err
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"exists-resp",
+		}, steps)
+
+		assert.Equal(t, ErrNoNode, existsErr)
+	})
+
+	t.Run("exists normal", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		var existsResp ExistsResponse
+		var existsErr error
+
+		c.Exists("/workers01",
+			func(resp ExistsResponse, err error) {
+				steps = append(steps, "exists-resp")
+				existsResp = resp
+				existsErr = err
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-workers01",
+			"exists-resp",
+		}, steps)
+
+		assert.Equal(t, nil, existsErr)
+		assert.Greater(t, existsResp.Zxid, int64(0))
+		checkStat(t, &existsResp.Stat)
+	})
 }
 
 func checkStat(t *testing.T, st *Stat) {

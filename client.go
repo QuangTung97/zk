@@ -951,3 +951,38 @@ func (c *Client) Set(
 		},
 	)
 }
+
+type ExistsResponse struct {
+	Zxid int64
+	Stat Stat
+}
+
+func (c *Client) Exists(
+	path string,
+	callback func(resp ExistsResponse, err error),
+) {
+	watch := clientWatchRequest{}
+	c.enqueueRequestWithWatcher(
+		opExists,
+		&existsRequest{
+			Path:  path,
+			Watch: false, // TODO
+		},
+		&existsResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(ExistsResponse{}, err)
+				return
+			}
+			r := resp.(*existsResponse)
+			callback(ExistsResponse{
+				Zxid: zxid,
+				Stat: r.Stat,
+			}, nil)
+		},
+		watch,
+	)
+}
