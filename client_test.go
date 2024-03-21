@@ -339,6 +339,18 @@ func TestClient_RecvData(t *testing.T) {
 
 		c.conn.readBuf.Write(buf[:4+n1+n2])
 
+		c.client.enqueueRequestWithWatcher(
+			opGetData, &getDataRequest{}, &getDataResponse{},
+			nil,
+			clientWatchRequest{
+				pathType: watchPathType{
+					path:  "/workers-resp",
+					wType: watchTypeData,
+				},
+				callback: func(ev clientWatchEvent) {},
+			},
+		)
+
 		c.client.readSingleData(c.conn)
 
 		// Check Handle Queue
@@ -362,5 +374,6 @@ func TestClient_RecvData(t *testing.T) {
 		}, queue[0])
 
 		callback(queue[0].req.response, queue[0].zxid, nil)
+		assert.Equal(t, 0, len(c.client.watchers))
 	})
 }

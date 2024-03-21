@@ -753,14 +753,59 @@ type ChildrenResponse struct {
 	Children []string
 }
 
+type childrenOpts struct {
+	watch         bool
+	watchCallback func(ev Event)
+}
+
+type ChildrenOption func(opts *childrenOpts)
+
+func WithChildrenWatch(callback func(ev Event)) ChildrenOption {
+	return func(opts *childrenOpts) {
+		if callback == nil {
+			return
+		}
+		opts.watch = true
+		opts.watchCallback = callback
+	}
+}
+
 func (c *Client) Children(
 	path string,
 	callback func(resp ChildrenResponse, err error),
+	options ...ChildrenOption,
 ) {
-	c.enqueueRequest(
+	opts := childrenOpts{
+		watch: false,
+	}
+	for _, fn := range options {
+		fn(&opts)
+	}
+
+	watch := clientWatchRequest{}
+	if opts.watch {
+		watch = clientWatchRequest{
+			pathType: watchPathType{
+				path:  path,
+				wType: watchTypeChild,
+			},
+			callback: func(ev clientWatchEvent) {
+				opts.watchCallback(Event{
+					Type:   ev.Type,
+					State:  ev.State,
+					Path:   ev.Path,
+					Err:    ev.Err,
+					Server: ev.Server,
+				})
+			},
+		}
+	}
+
+	c.enqueueRequestWithWatcher(
 		opGetChildren2,
 		&getChildren2Request{
-			Path: path,
+			Path:  path,
+			Watch: opts.watch,
 		},
 		&getChildren2Response{},
 		func(resp any, zxid int64, err error) {
@@ -777,5 +822,6 @@ func (c *Client) Children(
 				Children: r.Children,
 			}, nil)
 		},
+		watch,
 	)
 }

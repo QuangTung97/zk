@@ -239,4 +239,67 @@ func TestClient_Create_And_Get(t *testing.T) {
 			},
 		}, childrenResp)
 	})
+
+	t.Run("watch children", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var childrenResp ChildrenResponse
+		var childrenErr error
+		var watchEvent Event
+
+		c.Children("/",
+			func(resp ChildrenResponse, err error) {
+				steps = append(steps, "children")
+				childrenResp = resp
+				childrenErr = err
+			},
+			WithChildrenWatch(func(ev Event) {
+				steps = append(steps, "children-watch")
+				watchEvent = ev
+			}),
+		)
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp-01")
+			},
+		)
+
+		c.Create(
+			"/workers02", []byte("data02"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp-02")
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"children",
+			"children-watch",
+			"create-resp-01",
+			"create-resp-02",
+		}, steps)
+		assert.Equal(t, nil, childrenErr)
+
+		assert.Greater(t, childrenResp.Zxid, int64(0))
+		childrenResp.Zxid = 0
+
+		slices.Sort(childrenResp.Children)
+		assert.Equal(t, ChildrenResponse{
+			Children: []string{
+				"zookeeper",
+			},
+		}, childrenResp)
+
+		assert.Equal(t, Event{
+			Type:  EventNodeChildrenChanged,
+			State: 3,
+			Path:  "/",
+		}, watchEvent)
+	})
 }
