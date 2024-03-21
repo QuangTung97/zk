@@ -74,70 +74,6 @@ func (c *tcpConnTest) closeSession(client *Client) {
 	client.readSingleData(c)
 }
 
-func TestClientIntegration_Authenticate_And_Create(t *testing.T) {
-	t.Run("normal", func(t *testing.T) {
-		c, err := newClientInternal([]string{"localhost"}, 12*time.Second)
-		assert.Equal(t, nil, err)
-
-		netConn, err := net.Dial("tcp", "localhost:2181")
-		assert.Equal(t, nil, err)
-		defer func() { _ = netConn.Close() }()
-
-		connTest := &tcpConnTest{
-			conn: netConn,
-		}
-		defer connTest.closeSession(c)
-
-		// do authenticate
-		err = c.authenticate(connTest)
-		assert.Equal(t, nil, err)
-
-		req := &CreateRequest{
-			Path:  "/workers",
-			Data:  []byte("data01"),
-			Acl:   WorldACL(PermAll),
-			Flags: FlagEphemeral,
-		}
-
-		c.enqueueRequest(
-			opCreate,
-			req,
-			&createResponse{},
-			nil,
-		)
-
-		reqs, ok := c.getFromSendQueue()
-		assert.Equal(t, true, ok)
-		assert.Equal(t, 1, len(reqs))
-
-		// Do Send
-		err = c.sendData(connTest, reqs[0])
-		assert.Equal(t, nil, err)
-
-		// Recv Response
-		c.readSingleData(connTest)
-		assert.Equal(t, 1, len(c.handleQueue))
-
-		c.handleQueue[0].zxid = 0
-		assert.Equal(t, handleEvent{
-			state: StateHasSession,
-			req: clientRequest{
-				xid:    1,
-				opcode: opCreate,
-				request: &CreateRequest{
-					Path:  "/workers",
-					Data:  []byte("data01"),
-					Acl:   WorldACL(PermAll),
-					Flags: 1,
-				},
-				response: &createResponse{
-					Path: "/workers",
-				},
-			},
-		}, c.handleQueue[0])
-	})
-}
-
 func mustNewClient(_ *testing.T) *Client {
 	ch := make(chan struct{})
 	c, err := NewClient(
@@ -150,6 +86,9 @@ func mustNewClient(_ *testing.T) *Client {
 		panic(err)
 	}
 	<-ch
+
+	clearZKData(c)
+
 	return c
 }
 
@@ -728,19 +667,7 @@ func TestClientIntegration_Close_When_Not_Connected(t *testing.T) {
 	assert.Equal(t, StateDisconnected, c.state)
 }
 
-func mustNewClientWithClear(_ *testing.T) *Client {
-	ch := make(chan struct{})
-	c, err := NewClient(
-		[]string{"localhost"}, 30*time.Second,
-		WithSessionEstablishedCallback(func() {
-			close(ch)
-		}),
-	)
-	if err != nil {
-		panic(err)
-	}
-	<-ch
-
+func clearZKData(c *Client) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -767,13 +694,53 @@ func mustNewClientWithClear(_ *testing.T) *Client {
 	})
 
 	wg.Wait()
-
-	return c
 }
 
 func TestClientIntegration_Persistence(t *testing.T) {
-	t.Run("normal", func(t *testing.T) {
-		c := mustNewClientWithClear(t)
+	t.Run("seq files", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		c.Create("/workers",
+			nil, 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				if err != nil {
+					panic(err)
+				}
+			},
+		)
+
+		c.Create("/workers/job-",
+			[]byte("data01"), FlagEphemeral|FlagSequence, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				if err != nil {
+					panic(err)
+				}
+			},
+		)
+
+		c.Create("/workers/job-",
+			[]byte("data02"), FlagEphemeral|FlagSequence, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				if err != nil {
+					panic(err)
+				}
+			},
+		)
+
+		var childrenResp ChildrenResponse
+		c.Children("/workers", func(resp ChildrenResponse, err error) {
+			if err != nil {
+				panic(err)
+			}
+			childrenResp = resp
+		})
+
 		c.Close()
+
+		slices.Sort(childrenResp.Children)
+		assert.Equal(t, []string{
+			"job-0000000000",
+			"job-0000000001",
+		}, childrenResp.Children)
 	})
 }
