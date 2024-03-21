@@ -45,6 +45,8 @@ type Client struct {
 	readCodec     codecBuffer // not need to lock
 	authReadCodec codecBuffer // not need to lock
 
+	sessEstablishedCallback func()
+
 	// =================================
 	// protect following fields
 	// =================================
@@ -62,16 +64,17 @@ type Client struct {
 	sessionTimeoutMs int32
 	sessionID        int64
 
-	sendQueue []clientRequest
-	sendCond  *sync.Cond
+	sendQueue    []clientRequest
+	sendCond     *sync.Cond
+	sendShutdown bool
 
-	recvMap  map[int32]clientRequest
-	recvCond *sync.Cond
+	recvMap      map[int32]clientRequest
+	recvCond     *sync.Cond
+	recvShutdown bool
 
-	handleQueue []handleEvent
-	handleCond  *sync.Cond
-
-	shutdown bool
+	handleQueue    []handleEvent
+	handleCond     *sync.Cond
+	handleShutdown bool
 
 	conn tcpConn
 
@@ -83,6 +86,12 @@ type Client struct {
 
 // Option ...
 type Option func(c *Client)
+
+func WithSessionEstablishedCallback(callback func()) Option {
+	return func(c *Client) {
+		c.sessEstablishedCallback = callback
+	}
+}
 
 type clientRequest struct {
 	xid      int32
@@ -152,6 +161,10 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 		watchers: map[watchPathType][]func(ev clientWatchEvent){},
 	}
 
+	for _, option := range options {
+		option(c)
+	}
+
 	c.sendCond = sync.NewCond(&c.mut)
 	c.recvCond = sync.NewCond(&c.mut)
 	c.handleCond = sync.NewCond(&c.mut)
@@ -175,7 +188,9 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 			return requests, true
 		}
 
-		if c.shutdown {
+		if c.sendShutdown {
+			c.recvShutdown = true
+			c.recvCond.Signal()
 			return nil, false
 		}
 
@@ -229,7 +244,6 @@ func (c *Client) tryToConnect() tcpConn {
 	c.mut.Lock()
 
 	c.state = StateConnected
-	c.conn = conn
 
 	c.mut.Unlock()
 	err = c.authenticate(conn)
@@ -239,6 +253,7 @@ func (c *Client) tryToConnect() tcpConn {
 	}
 	c.mut.Lock()
 
+	c.conn = conn
 	return conn
 }
 
@@ -266,11 +281,13 @@ func (c *Client) getConnection() (tcpConn, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 	for {
+		if c.recvShutdown && len(c.recvMap) == 0 {
+			c.handleShutdown = true
+			c.handleCond.Signal()
+			return nil, false
+		}
 		if c.state == StateHasSession {
 			return c.conn, true
-		}
-		if c.shutdown && len(c.recvMap) == 0 {
-			return nil, false
 		}
 		c.recvCond.Wait()
 	}
@@ -298,7 +315,7 @@ func (c *Client) getHandleEvents() ([]handleEvent, bool) {
 			return events, true
 		}
 
-		if c.shutdown && len(c.sendQueue) == 0 && len(c.recvMap) == 0 {
+		if c.handleShutdown {
 			return nil, false
 		}
 
@@ -386,6 +403,19 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.setTimeouts(r.TimeOut)
 	c.passwd = r.Passwd
 	c.state = StateHasSession
+	if c.sessEstablishedCallback != nil {
+		c.handleQueue = append(c.handleQueue, handleEvent{
+			state: StateHasSession,
+			req: clientRequest{
+				opcode:   opWatcherEvent,
+				response: nil,
+				callback: func(res any, zxid int64, err error) {
+					c.sessEstablishedCallback()
+				},
+			},
+		})
+		c.handleCond.Signal()
+	}
 	c.mut.Unlock()
 
 	return nil
@@ -409,6 +439,19 @@ func (c *Client) enqueueRequestWithWatcher(
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
+	if c.sendShutdown {
+		log.Println("[ERROR] Zookeeper Client must not be accessed after Close")
+		return
+	}
+
+	c.enqueueAlreadyLocked(opCode, request, response, callback, watch)
+}
+
+func (c *Client) enqueueAlreadyLocked(
+	opCode int32, request any, response any,
+	callback func(resp any, zxid int64, err error),
+	watch clientWatchRequest,
+) {
 	req := clientRequest{
 		xid:      c.nextXid(),
 		opcode:   opCode,
@@ -449,6 +492,40 @@ func (c *Client) disconnectAndClose(conn tcpConn) {
 	}
 }
 
+func (c *Client) updateStateAndFlushRequests(finalState State) bool {
+	c.state = finalState
+	c.conn = nil
+
+	events := make([]handleEvent, len(c.recvMap)+len(c.sendQueue))
+
+	for _, req := range c.recvMap {
+		events = append(events, handleEvent{
+			state: c.state,
+			err:   ErrConnectionClosed,
+			req:   req,
+		})
+	}
+	c.recvMap = map[int32]clientRequest{}
+
+	for _, req := range c.sendQueue {
+		events = append(events, handleEvent{
+			state: c.state,
+			err:   ErrConnectionClosed,
+			req:   req,
+		})
+	}
+	c.sendQueue = nil
+
+	slices.SortFunc(events, func(a, b handleEvent) int {
+		return int(b.req.xid - a.req.xid)
+	})
+
+	c.handleQueue = append(c.handleQueue, events...)
+	c.handleCond.Signal()
+
+	return true
+}
+
 func (c *Client) disconnect(conn tcpConn) bool {
 	if conn == nil {
 		panic("conn can not be nil")
@@ -464,37 +541,7 @@ func (c *Client) disconnect(conn tcpConn) bool {
 		return false
 	}
 
-	c.state = StateDisconnected
-	c.conn = nil
-
-	events := make([]handleEvent, len(c.recvMap)+len(c.sendQueue))
-
-	for _, req := range c.recvMap {
-		events = append(events, handleEvent{
-			state: StateDisconnected,
-			err:   ErrConnectionClosed,
-			req:   req,
-		})
-	}
-	c.recvMap = map[int32]clientRequest{}
-
-	for _, req := range c.sendQueue {
-		events = append(events, handleEvent{
-			state: StateDisconnected,
-			err:   ErrConnectionClosed,
-			req:   req,
-		})
-	}
-	c.sendQueue = nil
-
-	slices.SortFunc(events, func(a, b handleEvent) int {
-		return int(b.req.xid - a.req.xid)
-	})
-
-	c.handleQueue = append(c.handleQueue, events...)
-	c.handleCond.Signal()
-
-	return true
+	return c.updateStateAndFlushRequests(StateDisconnected)
 }
 
 func (c *Client) sendData(conn tcpConn, req clientRequest) error {
@@ -534,7 +581,6 @@ func (c *Client) readSingleData(conn tcpConn) {
 	// read package length
 	_ = conn.SetReadDeadline(c.recvTimeout)
 	_, err := io.ReadFull(conn, buf[:4])
-	_ = conn.SetReadDeadline(0)
 	if err != nil {
 		// TODO check error
 		return
@@ -652,21 +698,44 @@ func (c *Client) readSingleData(conn tcpConn) {
 // Close ...
 func (c *Client) Close() {
 	c.mut.Lock()
-	defer c.mut.Unlock()
 
-	c.shutdown = true
+	c.sendShutdown = true
+	c.enqueueAlreadyLocked(opClose, &closeRequest{}, &closeResponse{}, nil, clientWatchRequest{})
+
+	conn := c.conn
+	c.mut.Unlock()
+
 	c.sendCond.Signal()
-	c.recvCond.Signal()
-	c.handleCond.Signal()
+
+	c.wg.Wait()
+
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+type CreateResponse struct {
+	Zxid int64
+	Path string
 }
 
 // Create ...
-func (c *Client) Create(path string, data []byte, flags int32, acl []ACL) {
+func (c *Client) Create(
+	path string, data []byte, flags int32, acl []ACL,
+	callback func(resp CreateResponse, err error),
+) {
 	c.enqueueRequest(
 		opCreate,
-		&CreateRequest{},
+		&CreateRequest{
+			Path:  path,
+			Data:  data,
+			Flags: flags,
+			Acl:   acl,
+		},
 		&createResponse{},
 		func(resp any, zxid int64, err error) {
+			r := resp.(*createResponse)
+			callback(CreateResponse{Path: r.Path, Zxid: zxid}, err)
 		},
 	)
 }

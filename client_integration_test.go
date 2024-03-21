@@ -135,3 +135,45 @@ func TestClientIntegration_Authenticate_And_Create(t *testing.T) {
 		}, c.handleQueue[0])
 	})
 }
+
+func mustNewClient(_ *testing.T) *Client {
+	ch := make(chan struct{})
+	c, err := NewClient(
+		[]string{"localhost"}, 30*time.Second,
+		WithSessionEstablishedCallback(func() {
+			close(ch)
+		}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	<-ch
+	return c
+}
+
+func TestClient_Create_And_Get(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var createResp CreateResponse
+		var createErr error
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				createResp = resp
+				createErr = err
+			},
+		)
+		c.Close()
+
+		assert.Equal(t, nil, createErr)
+
+		assert.Greater(t, createResp.Zxid, int64(0))
+		createResp.Zxid = 0
+		assert.Equal(t, CreateResponse{
+			Path: "/workers01",
+		}, createResp)
+	})
+}
