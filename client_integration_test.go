@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,7 +153,7 @@ func mustNewClient(_ *testing.T) *Client {
 	return c
 }
 
-func TestClient_All_Ephemeral(t *testing.T) {
+func TestClientIntegration_All_Ephemeral(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		c := mustNewClient(t)
 
@@ -713,7 +714,7 @@ func checkStat(t *testing.T, st *Stat) {
 	*st = Stat{}
 }
 
-func TestClient_Close_When_Not_Connected(t *testing.T) {
+func TestClientIntegration_Close_When_Not_Connected(t *testing.T) {
 	c, err := NewClient(
 		[]string{"localhost:1800"}, 30*time.Second,
 		WithSessionEstablishedCallback(func() {
@@ -725,4 +726,54 @@ func TestClient_Close_When_Not_Connected(t *testing.T) {
 
 	c.Close()
 	assert.Equal(t, StateDisconnected, c.state)
+}
+
+func mustNewClientWithClear(_ *testing.T) *Client {
+	ch := make(chan struct{})
+	c, err := NewClient(
+		[]string{"localhost"}, 30*time.Second,
+		WithSessionEstablishedCallback(func() {
+			close(ch)
+		}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	<-ch
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	c.Children("/", func(resp ChildrenResponse, err error) {
+		defer wg.Done()
+		if err != nil {
+			panic(err)
+		}
+		for _, node := range resp.Children {
+			if node == "zookeeper" {
+				continue
+			}
+			p := "/" + node
+			wg.Add(1)
+			c.Get(p, func(resp GetResponse, err error) {
+				if err != nil {
+					panic(err)
+				}
+				c.Delete(p, resp.Stat.Version, func(resp DeleteResponse, err error) {
+					wg.Done()
+				})
+			})
+		}
+	})
+
+	wg.Wait()
+
+	return c
+}
+
+func TestClientIntegration_Persistence(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		c := mustNewClientWithClear(t)
+		c.Close()
+	})
 }

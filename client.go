@@ -278,10 +278,6 @@ func (c *Client) doConnect() (tcpConn, bool) {
 		return nil, false
 	}
 
-	c.mut.Lock()
-	c.conn = conn
-	c.mut.Unlock()
-
 	return conn, true
 }
 
@@ -446,6 +442,8 @@ func (c *Client) authenticate(conn tcpConn) error {
 		})
 		c.handleCond.Signal()
 	}
+	c.conn = conn
+	c.recvCond.Signal()
 	c.mut.Unlock()
 
 	return nil
@@ -1058,5 +1056,35 @@ func (c *Client) Exists(
 			}, nil)
 		},
 		watch,
+	)
+}
+
+type DeleteResponse struct {
+	Zxid int64
+}
+
+func (c *Client) Delete(
+	path string, version int32,
+	callback func(resp DeleteResponse, err error),
+) {
+	c.enqueueRequest(
+		opDelete,
+		&DeleteRequest{
+			Path:    path,
+			Version: version,
+		},
+		&deleteResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(DeleteResponse{}, err)
+				return
+			}
+			callback(DeleteResponse{
+				Zxid: zxid,
+			}, nil)
+		},
 	)
 }
