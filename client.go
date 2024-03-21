@@ -3,7 +3,6 @@ package zk
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -75,6 +74,8 @@ type Client struct {
 	shutdown bool
 
 	conn tcpConn
+
+	watchers map[watchPathType][]func(ev clientWatchEvent)
 	// =================================
 
 	wg sync.WaitGroup
@@ -105,6 +106,11 @@ type clientWatchEvent struct {
 	Path   string // For non-session events, the path of the watched node.
 	Err    error
 	Server string // For connection events
+}
+
+type clientWatchRequest struct {
+	pathType watchPathType
+	callback func(ev clientWatchEvent)
 }
 
 type tcpConn interface {
@@ -142,9 +148,12 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 		passwd: emptyPassword,
 
 		recvMap: map[int32]clientRequest{},
+
+		watchers: map[watchPathType][]func(ev clientWatchEvent){},
 	}
 
 	c.sendCond = sync.NewCond(&c.mut)
+	c.recvCond = sync.NewCond(&c.mut)
 	c.handleCond = sync.NewCond(&c.mut)
 
 	c.setTimeouts(int32(sessionTimeout / time.Millisecond))
@@ -363,10 +372,14 @@ func (c *Client) authenticate(conn tcpConn) error {
 		c.lastZxid = 0
 		c.state = StateExpired
 
+		// TODO Clear Watch
+
 		c.mut.Unlock()
 
 		return ErrSessionExpired
 	}
+
+	// TODO Re-apply watch and auth infos
 
 	c.mut.Lock()
 	c.sessionID = r.SessionID
@@ -382,6 +395,17 @@ func (c *Client) enqueueRequest(
 	opCode int32, request any, response any,
 	callback func(resp any, zxid int64, err error),
 ) {
+	c.enqueueRequestWithWatcher(
+		opCode, request,
+		response, callback, clientWatchRequest{},
+	)
+}
+
+func (c *Client) enqueueRequestWithWatcher(
+	opCode int32, request any, response any,
+	callback func(resp any, zxid int64, err error),
+	watch clientWatchRequest,
+) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -392,6 +416,11 @@ func (c *Client) enqueueRequest(
 		response: response,
 
 		callback: callback,
+	}
+
+	pathType := watch.pathType
+	if len(pathType.path) > 0 {
+		c.watchers[pathType] = append(c.watchers[pathType], watch.callback)
 	}
 
 	if c.state == StateHasSession {
@@ -421,6 +450,10 @@ func (c *Client) disconnectAndClose(conn tcpConn) {
 }
 
 func (c *Client) disconnect(conn tcpConn) bool {
+	if conn == nil {
+		panic("conn can not be nil")
+	}
+
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -432,6 +465,7 @@ func (c *Client) disconnect(conn tcpConn) bool {
 	}
 
 	c.state = StateDisconnected
+	c.conn = nil
 
 	events := make([]handleEvent, len(c.recvMap)+len(c.sendQueue))
 
@@ -539,8 +573,18 @@ func (c *Client) readSingleData(conn tcpConn) {
 			Path:  watchResp.Path,
 			Err:   nil,
 		}
-		fmt.Println("EVENT:", ev)
+
 		c.mut.Lock()
+
+		// TODO get from watchers
+		watchTypes := computeWatchTypes(watchResp.Type)
+		var callbacks []func(ev clientWatchEvent)
+		for _, wType := range watchTypes {
+			wpt := watchPathType{path: ev.Path, wType: wType}
+			callbacks = append(callbacks, c.watchers[wpt]...)
+			delete(c.watchers, wpt)
+		}
+
 		c.handleQueue = append(c.handleQueue, handleEvent{
 			state: c.state,
 			zxid:  res.Zxid,
@@ -548,13 +592,17 @@ func (c *Client) readSingleData(conn tcpConn) {
 				xid:      -1,
 				opcode:   opWatcherEvent,
 				response: &ev,
+				callback: func(res any, zxid int64, err error) {
+					ev := res.(*clientWatchEvent)
+					for _, cb := range callbacks {
+						cb(*ev)
+					}
+				},
 			},
 			err: res.Err.toError(),
 		})
 		c.handleCond.Signal()
 		c.mut.Unlock()
-		//c.sendEvent(ev)
-		//c.notifyWatches(ev)
 		return
 	}
 	if res.Xid == -2 {
@@ -599,4 +647,26 @@ func (c *Client) readSingleData(conn tcpConn) {
 		err:   err,
 	})
 	c.handleCond.Signal()
+}
+
+// Close ...
+func (c *Client) Close() {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	c.shutdown = true
+	c.sendCond.Signal()
+	c.recvCond.Signal()
+	c.handleCond.Signal()
+}
+
+// Create ...
+func (c *Client) Create(path string, data []byte, flags int32, acl []ACL) {
+	c.enqueueRequest(
+		opCreate,
+		&CreateRequest{},
+		&createResponse{},
+		func(resp any, zxid int64, err error) {
+		},
+	)
 }

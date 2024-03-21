@@ -342,7 +342,11 @@ func TestClient_RecvData(t *testing.T) {
 		c.client.readSingleData(c.conn)
 
 		// Check Handle Queue
-		assert.Equal(t, 1, len(c.client.handleQueue))
+		queue := c.client.handleQueue
+
+		assert.Equal(t, 1, len(queue))
+		callback := queue[0].req.callback
+		queue[0].req.callback = nil
 		assert.Equal(t, handleEvent{
 			state: StateHasSession,
 			zxid:  73,
@@ -355,6 +359,8 @@ func TestClient_RecvData(t *testing.T) {
 					Path:  "/workers-resp",
 				},
 			},
-		}, c.client.handleQueue[0])
+		}, queue[0])
+
+		callback(queue[0].req.response, queue[0].zxid, nil)
 	})
 }

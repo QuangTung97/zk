@@ -125,3 +125,18 @@ func validatePath(path string, isSequential bool) error {
 	}
 	return nil
 }
+
+func computeWatchTypes(eventType EventType) []watchType {
+	switch eventType {
+	case EventNodeCreated:
+		return []watchType{watchTypeExist}
+	case EventNodeDataChanged:
+		return []watchType{watchTypeExist, watchTypeData}
+	case EventNodeChildrenChanged:
+		return []watchType{watchTypeChild}
+	case EventNodeDeleted:
+		return []watchType{watchTypeExist, watchTypeData, watchTypeChild}
+	default:
+		return nil
+	}
+}

@@ -56,12 +56,15 @@ func TestClientIntegration_Authenticate(t *testing.T) {
 }
 
 func (c *tcpConnTest) closeSession(client *Client) {
-	err := client.sendData(c, clientRequest{
-		xid:      client.nextXid(),
-		opcode:   opClose,
-		request:  &closeRequest{},
-		response: &closeResponse{},
-	})
+	client.enqueueRequest(
+		opClose,
+		&closeRequest{},
+		&closeResponse{},
+		nil,
+	)
+
+	reqs, _ := client.getFromSendQueue()
+	err := client.sendData(c, reqs[0])
 	if err != nil {
 		panic(err)
 	}
@@ -87,20 +90,26 @@ func TestClientIntegration_Authenticate_And_Create(t *testing.T) {
 		err = c.authenticate(connTest)
 		assert.Equal(t, nil, err)
 
-		req := clientRequest{
-			xid:    c.nextXid(),
-			opcode: opCreate,
-			request: &CreateRequest{
-				Path:  "/workers",
-				Data:  []byte("data01"),
-				Acl:   WorldACL(PermAll),
-				Flags: FlagEphemeral,
-			},
-			response: &createResponse{},
+		req := &CreateRequest{
+			Path:  "/workers",
+			Data:  []byte("data01"),
+			Acl:   WorldACL(PermAll),
+			Flags: FlagEphemeral,
 		}
 
+		c.enqueueRequest(
+			opCreate,
+			req,
+			&createResponse{},
+			nil,
+		)
+
+		reqs, ok := c.getFromSendQueue()
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 1, len(reqs))
+
 		// Do Send
-		err = c.sendData(connTest, req)
+		err = c.sendData(connTest, reqs[0])
 		assert.Equal(t, nil, err)
 
 		// Recv Response
