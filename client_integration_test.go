@@ -755,7 +755,13 @@ func TestClientIntegration_Persistence(t *testing.T) {
 
 func TestClientIntegration_WithDisconnect(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		c := mustNewClient(t, WithDialRetryDuration(100*time.Millisecond))
+		var reconnectCalls int
+		c := mustNewClient(t,
+			WithDialRetryDuration(100*time.Millisecond),
+			WithReconnectingCallback(func() {
+				reconnectCalls++
+			}),
+		)
 
 		ch := make(chan struct{})
 		c.Create("/workers00",
@@ -833,6 +839,8 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			"get-watch",
 			"delete-00",
 		}, steps)
+
+		assert.Equal(t, 1, reconnectCalls)
 	})
 }
 

@@ -48,6 +48,7 @@ type Client struct {
 	authReadCodec codecBuffer // not need to lock
 
 	sessEstablishedCallback func()
+	reconnectingCallback    func()
 
 	lastZxid int64
 
@@ -94,6 +95,12 @@ type Option func(c *Client)
 func WithSessionEstablishedCallback(callback func()) Option {
 	return func(c *Client) {
 		c.sessEstablishedCallback = callback
+	}
+}
+
+func WithReconnectingCallback(callback func()) Option {
+	return func(c *Client) {
+		c.reconnectingCallback = callback
 	}
 }
 
@@ -444,6 +451,21 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.setTimeouts(r.TimeOut)
 	c.passwd = r.Passwd
 	c.state = StateHasSession
+	c.conn = conn
+
+	c.handleGlobalCallbacks(prevIsZero)
+
+	// TODO Reapply ACL
+	c.reapplyAllWatches()
+
+	c.mut.Unlock()
+
+	c.recvCond.Signal()
+
+	return nil
+}
+
+func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 	if c.sessEstablishedCallback != nil && prevIsZero {
 		c.handleQueue = append(c.handleQueue, handleEvent{
 			state: StateHasSession,
@@ -457,15 +479,20 @@ func (c *Client) authenticate(conn tcpConn) error {
 		})
 		c.handleCond.Signal()
 	}
-	c.conn = conn
 
-	// TODO Reapply ACL
-	c.reapplyAllWatches()
-	c.mut.Unlock()
-
-	c.recvCond.Signal()
-
-	return nil
+	if c.reconnectingCallback != nil && !prevIsZero {
+		c.handleQueue = append(c.handleQueue, handleEvent{
+			state: StateHasSession,
+			req: clientRequest{
+				opcode:   opWatcherEvent,
+				response: nil,
+				callback: func(res any, zxid int64, err error) {
+					c.reconnectingCallback()
+				},
+			},
+		})
+		c.handleCond.Signal()
+	}
 }
 
 func (c *Client) reapplyAllWatches() {
