@@ -3,6 +3,7 @@ package zk
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -95,6 +96,14 @@ type handleEvent struct {
 	zxid  int64
 	err   error
 	req   clientRequest
+}
+
+type clientWatchEvent struct {
+	Type   EventType
+	State  State
+	Path   string // For non-session events, the path of the watched node.
+	Err    error
+	Server string // For connection events
 }
 
 type tcpConn interface {
@@ -476,18 +485,32 @@ func (c *Client) readSingleData(conn tcpConn) {
 	}
 
 	if res.Xid == -1 {
-		// TODO Handle Watch Event
-		//res := &watcherEvent{}
-		//_, err = decodePacket(buf[16:blen], res)
-		//if err != nil {
-		//	return err
-		//}
-		//ev := Event{
-		//	Type:  res.Type,
-		//	State: res.State,
-		//	Path:  res.Path,
-		//	Err:   nil,
-		//}
+		watchResp := &watcherEvent{}
+		_, err = decodePacket(buf[16:blen], watchResp)
+		if err != nil {
+			// TODO Handle Decode Error
+			return
+		}
+		ev := clientWatchEvent{
+			Type:  watchResp.Type,
+			State: watchResp.State,
+			Path:  watchResp.Path,
+			Err:   nil,
+		}
+		fmt.Println("EVENT:", ev)
+		c.mut.Lock()
+		c.handleQueue = append(c.handleQueue, handleEvent{
+			state: c.state,
+			zxid:  res.Zxid,
+			req: clientRequest{
+				xid:      -1,
+				opcode:   opWatcherEvent,
+				response: &ev,
+			},
+			err: res.Err.toError(),
+		})
+		c.handleCond.Signal()
+		c.mut.Unlock()
 		//c.sendEvent(ev)
 		//c.notifyWatches(ev)
 		return

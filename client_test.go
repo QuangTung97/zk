@@ -308,4 +308,42 @@ func TestClient_RecvData(t *testing.T) {
 			},
 		}, c.client.handleQueue[0])
 	})
+
+	t.Run("receive watch event", func(t *testing.T) {
+		c := newClientTest(t)
+		c.doAuthenticate()
+
+		buf := make([]byte, 2048)
+		n1, _ := encodePacket(buf[4:], &responseHeader{
+			Xid:  -1,
+			Zxid: 73,
+			Err:  0,
+		})
+		n2, _ := encodePacket(buf[4+n1:], &watcherEvent{
+			Path:  "/workers-resp",
+			State: StateHasSession,
+			Type:  EventNodeDataChanged,
+		})
+		binary.BigEndian.PutUint32(buf[:4], uint32(n1+n2))
+
+		c.conn.readBuf.Write(buf[:4+n1+n2])
+
+		c.client.readSingleData(c.conn)
+
+		// Check Handle Queue
+		assert.Equal(t, 1, len(c.client.handleQueue))
+		assert.Equal(t, handleEvent{
+			state: StateHasSession,
+			zxid:  73,
+			req: clientRequest{
+				xid:    -1,
+				opcode: opWatcherEvent,
+				response: &clientWatchEvent{
+					Type:  EventNodeDataChanged,
+					State: StateHasSession,
+					Path:  "/workers-resp",
+				},
+			},
+		}, c.client.handleQueue[0])
+	})
 }
