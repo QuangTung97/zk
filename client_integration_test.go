@@ -152,7 +152,7 @@ func mustNewClient(_ *testing.T) *Client {
 	return c
 }
 
-func TestClient_Create_And_Get(t *testing.T) {
+func TestClient_All_Ephemeral(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		c := mustNewClient(t)
 
@@ -659,6 +659,48 @@ func TestClient_Create_And_Get(t *testing.T) {
 		assert.Equal(t, nil, existsErr)
 		assert.Greater(t, existsResp.Zxid, int64(0))
 		checkStat(t, &existsResp.Stat)
+	})
+
+	t.Run("exists with watch create", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var existsErr error
+		var watchEvent Event
+
+		c.Exists("/workers01",
+			func(resp ExistsResponse, err error) {
+				steps = append(steps, "exists-resp")
+				existsErr = err
+			},
+			WithExistsWatch(func(ev Event) {
+				steps = append(steps, "exists-watch")
+				watchEvent = ev
+			}),
+		)
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"exists-resp",
+			"exists-watch",
+			"create-workers01",
+		}, steps)
+
+		assert.Equal(t, ErrNoNode, existsErr)
+		assert.Equal(t, Event{
+			Type:  EventNodeCreated,
+			State: 3,
+			Path:  "/workers01",
+		}, watchEvent)
 	})
 }
 

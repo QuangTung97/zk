@@ -957,16 +957,59 @@ type ExistsResponse struct {
 	Stat Stat
 }
 
+type existsOpts struct {
+	watch         bool
+	watchCallback func(ev Event)
+}
+
+type ExistsOption func(opts *existsOpts)
+
+func WithExistsWatch(callback func(ev Event)) ExistsOption {
+	return func(opts *existsOpts) {
+		if callback == nil {
+			return
+		}
+		opts.watch = true
+		opts.watchCallback = callback
+	}
+}
+
 func (c *Client) Exists(
 	path string,
 	callback func(resp ExistsResponse, err error),
+	options ...ExistsOption,
 ) {
+	opts := existsOpts{
+		watch: false,
+	}
+	for _, fn := range options {
+		fn(&opts)
+	}
+
 	watch := clientWatchRequest{}
+	if opts.watch {
+		watch = clientWatchRequest{
+			pathType: watchPathType{
+				path:  path,
+				wType: watchTypeExist,
+			},
+			callback: func(ev clientWatchEvent) {
+				opts.watchCallback(Event{
+					Type:   ev.Type,
+					State:  ev.State,
+					Path:   ev.Path,
+					Err:    ev.Err,
+					Server: ev.Server,
+				})
+			},
+		}
+	}
+
 	c.enqueueRequestWithWatcher(
 		opExists,
 		&existsRequest{
 			Path:  path,
-			Watch: false, // TODO
+			Watch: opts.watch,
 		},
 		&existsResponse{},
 		func(resp any, zxid int64, err error) {
