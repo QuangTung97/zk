@@ -31,6 +31,10 @@ func (c *tcpConnTest) SetWriteDeadline(d time.Duration) error {
 	return c.conn.SetWriteDeadline(time.Now().Add(d))
 }
 
+func (c *tcpConnTest) Close() error {
+	return c.conn.Close()
+}
+
 func TestClientIntegration_Authenticate(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		c, err := newClientInternal([]string{"localhost"}, 12*time.Second)

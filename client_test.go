@@ -59,6 +59,10 @@ func (c *connMock) SetReadDeadline(d time.Duration) error {
 	return nil
 }
 
+func (c *connMock) Close() error {
+	return nil
+}
+
 func (c *connMock) SetWriteDeadline(d time.Duration) error {
 	c.writeDuration = append(c.writeDuration, d)
 	return nil
@@ -271,12 +275,19 @@ func TestClient_RecvData(t *testing.T) {
 			Flags: FlagEphemeral,
 		}
 
-		_ = c.client.sendData(c.conn, clientRequest{
-			xid:      xid1,
-			opcode:   opCreate,
-			request:  req,
-			response: &createResponse{},
-		})
+		c.client.nextXidValue = xid1 - 1
+		c.client.enqueueRequest(
+			opCreate,
+			req,
+			&createResponse{},
+			nil,
+		)
+
+		reqs, ok := c.client.getFromSendQueue()
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 1, len(reqs))
+
+		_ = c.client.sendData(c.conn, reqs[0])
 
 		buf := make([]byte, 2048)
 		n1, _ := encodePacket(buf[4:], &responseHeader{

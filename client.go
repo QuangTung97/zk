@@ -7,8 +7,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -42,13 +42,16 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 type Client struct {
 	servers []string
 
-	writeCodec codecBuffer // not need to lock
-	readCodec  codecBuffer // not need to lock
+	writeCodec    codecBuffer // not need to lock
+	readCodec     codecBuffer // not need to lock
+	authReadCodec codecBuffer // not need to lock
 
 	// =================================
 	// protect following fields
 	// =================================
 	mut sync.Mutex
+
+	nextXidValue uint32
 
 	passwd       []byte
 	recvTimeout  time.Duration
@@ -63,7 +66,8 @@ type Client struct {
 	sendQueue []clientRequest
 	sendCond  *sync.Cond
 
-	recvMap map[int32]clientRequest
+	recvMap  map[int32]clientRequest
+	recvCond *sync.Cond
 
 	handleQueue []handleEvent
 	handleCond  *sync.Cond
@@ -72,9 +76,6 @@ type Client struct {
 
 	conn tcpConn
 	// =================================
-
-	// not need to lock by mutex
-	nextXidValue uint32
 
 	wg sync.WaitGroup
 }
@@ -109,6 +110,7 @@ type clientWatchEvent struct {
 type tcpConn interface {
 	io.Reader
 	io.Writer
+	io.Closer
 
 	// SetReadDeadline sets the deadline for future Read calls
 	// and any currently-blocked Read call.
@@ -157,6 +159,9 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 	for {
 		if len(c.sendQueue) > 0 {
 			requests := c.sendQueue
+			for _, req := range requests {
+				c.recvMap[req.xid] = req
+			}
 			c.sendQueue = nil
 			return requests, true
 		}
@@ -189,15 +194,20 @@ func (c *tcpConnImpl) SetWriteDeadline(d time.Duration) error {
 	return c.conn.SetWriteDeadline(time.Now().Add(d))
 }
 
+func (c *tcpConnImpl) Close() error {
+	return c.conn.Close()
+}
+
 func (c *Client) tryToConnect() tcpConn {
 	c.mut.Lock()
+	defer c.mut.Unlock()
+
 	if c.state == StateHasSession {
-		c.mut.Unlock()
 		return c.conn
 	}
 	c.state = StateConnecting
-	c.mut.Unlock()
 
+	c.mut.Unlock()
 	netConn, err := net.Dial("tcp", c.servers[0])
 	if err != nil {
 		// TODO Handle
@@ -207,17 +217,18 @@ func (c *Client) tryToConnect() tcpConn {
 	conn := &tcpConnImpl{
 		conn: netConn,
 	}
-
 	c.mut.Lock()
+
 	c.state = StateConnected
 	c.conn = conn
-	c.mut.Unlock()
 
+	c.mut.Unlock()
 	err = c.authenticate(conn)
 	if err != nil {
 		// TODO Handle error
 		panic(err)
 	}
+	c.mut.Lock()
 
 	return conn
 }
@@ -234,21 +245,32 @@ func (c *Client) runSender() {
 		for _, req := range requests {
 			err := c.sendData(conn, req)
 			if err != nil {
-				// TODO Handle error
+				c.disconnectAndClose(conn)
+				break
 			}
 		}
 
 	}
 }
 
+func (c *Client) getConnection() (tcpConn, bool) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	for {
+		if c.state == StateHasSession {
+			return c.conn, true
+		}
+		if c.shutdown && len(c.recvMap) == 0 {
+			return nil, false
+		}
+		c.recvCond.Wait()
+	}
+}
+
 func (c *Client) runReceiver() {
 	for {
-		c.mut.Lock()
-		conn := c.conn
-		closed := c.shutdown
-		c.mut.Unlock()
-
-		if closed {
+		conn, ok := c.getConnection()
+		if !ok {
 			return
 		}
 
@@ -283,11 +305,14 @@ func (c *Client) runHandler() {
 		}
 
 		for _, e := range events {
-			if e.req.callback != nil {
-				e.req.callback(e.req.response, e.zxid, e.err)
-			}
+			c.handleEventCallback(e)
 		}
+	}
+}
 
+func (c *Client) handleEventCallback(ev handleEvent) {
+	if ev.req.callback != nil {
+		ev.req.callback(ev.req.response, ev.zxid, ev.err)
 	}
 }
 
@@ -299,7 +324,8 @@ func (c *Client) setTimeouts(sessionTimeoutMs int32) {
 }
 
 func (c *Client) nextXid() int32 {
-	return int32(atomic.AddUint32(&c.nextXidValue, 1) & 0x7fffffff)
+	c.nextXidValue++
+	return int32(c.nextXidValue & 0x7fffffff)
 }
 
 func (c *Client) authenticate(conn tcpConn) error {
@@ -323,7 +349,7 @@ func (c *Client) authenticate(conn tcpConn) error {
 	r := connectResponse{}
 
 	_ = conn.SetReadDeadline(c.recvTimeout * 10)
-	err = decodeObject[connectResponse](&r, &c.readCodec, conn)
+	err = decodeObject[connectResponse](&r, &c.authReadCodec, conn)
 	_ = conn.SetReadDeadline(0)
 	if err != nil {
 		return err
@@ -387,13 +413,30 @@ func (c *Client) enqueueRequest(
 	c.handleCond.Signal()
 }
 
-func (c *Client) disconnect() {
+func (c *Client) disconnectAndClose(conn tcpConn) {
+	ok := c.disconnect(conn)
+	if ok {
+		_ = conn.Close()
+	}
+}
+
+func (c *Client) disconnect(conn tcpConn) bool {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
+	if c.state != StateHasSession {
+		return false
+	}
+	if c.conn != conn {
+		return false
+	}
+
 	c.state = StateDisconnected
+
+	events := make([]handleEvent, len(c.recvMap)+len(c.sendQueue))
+
 	for _, req := range c.recvMap {
-		c.handleQueue = append(c.handleQueue, handleEvent{
+		events = append(events, handleEvent{
 			state: StateDisconnected,
 			err:   ErrConnectionClosed,
 			req:   req,
@@ -402,7 +445,7 @@ func (c *Client) disconnect() {
 	c.recvMap = map[int32]clientRequest{}
 
 	for _, req := range c.sendQueue {
-		c.handleQueue = append(c.handleQueue, handleEvent{
+		events = append(events, handleEvent{
 			state: StateDisconnected,
 			err:   ErrConnectionClosed,
 			req:   req,
@@ -410,30 +453,30 @@ func (c *Client) disconnect() {
 	}
 	c.sendQueue = nil
 
+	slices.SortFunc(events, func(a, b handleEvent) int {
+		return int(b.req.xid - a.req.xid)
+	})
+
+	c.handleQueue = append(c.handleQueue, events...)
 	c.handleCond.Signal()
+
+	return true
 }
 
 func (c *Client) sendData(conn tcpConn, req clientRequest) error {
-	c.mut.Lock()
-	// TODO Check Closed
-	c.recvMap[req.xid] = req
-	c.mut.Unlock()
-
 	header := &requestHeader{req.xid, req.opcode}
 	buf := c.writeCodec.buf[:]
 
 	// encode header
 	n, err := encodePacket(buf[4:], header)
 	if err != nil {
-		// TODO Handle Encode Error
-		return nil
+		return err
 	}
 
 	// encode request object
 	n2, err := encodePacket(buf[4+n:], req.request)
 	if err != nil {
-		// TODO Handle Encode Error
-		return nil
+		return err
 	}
 
 	n += n2
@@ -445,7 +488,6 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) error {
 	_, err = conn.Write(buf[:n+4])
 	_ = conn.SetWriteDeadline(0)
 	if err != nil {
-		// TODO Handle Connection Error
 		return err
 	}
 
