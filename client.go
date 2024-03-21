@@ -478,10 +478,13 @@ func (c *Client) reapplyAllWatches() {
 	}
 
 	for wpt := range c.watchers {
-		// TODO Other Watches
 		switch wpt.wType {
 		case watchTypeExist:
 			req.ExistWatches = append(req.ExistWatches, wpt.path)
+		case watchTypeChild:
+			req.ChildWatches = append(req.ChildWatches, wpt.path)
+		case watchTypeData:
+			req.DataWatches = append(req.DataWatches, wpt.path)
 		default:
 		}
 	}

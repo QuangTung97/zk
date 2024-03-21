@@ -757,6 +757,15 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		c := mustNewClient(t, WithDialRetryDuration(100*time.Millisecond))
 
+		ch := make(chan struct{})
+		c.Create("/workers00",
+			nil, 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				close(ch)
+			},
+		)
+		<-ch
+
 		var steps []string
 
 		c.Exists("/workers01",
@@ -764,6 +773,18 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			},
 			WithExistsWatch(func(ev Event) {
 				steps = append(steps, "exists-watch")
+			}),
+		)
+		c.Children("/",
+			func(resp ChildrenResponse, err error) {},
+			WithChildrenWatch(func(ev Event) {
+				steps = append(steps, "children-watch")
+			}),
+		)
+		c.Get("/workers00",
+			func(resp GetResponse, err error) {
+			}, WithGetWatch(func(ev Event) {
+				steps = append(steps, "get-watch")
 			}),
 		)
 
@@ -797,6 +818,9 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 				mut.Unlock()
 			},
 		)
+		c.Delete("/workers00", 0, func(resp DeleteResponse, err error) {
+			steps = append(steps, "delete-00")
+		})
 
 		c.Close()
 
@@ -804,7 +828,10 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		assert.Equal(t, []string{
 			"create01",
 			"exists-watch",
+			"children-watch",
 			"create02",
+			"get-watch",
+			"delete-00",
 		}, steps)
 	})
 }
@@ -812,7 +839,6 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 func TestClientInternal_WithSessionExpired(t *testing.T) {
 	t.Run("session not expired because of reconnect", func(t *testing.T) {
 		t.Skip()
-
 		ch := make(chan struct{}, 1)
 
 		var calls int
