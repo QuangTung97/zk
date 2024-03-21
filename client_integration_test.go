@@ -5,6 +5,7 @@ package zk
 import (
 	"fmt"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -152,16 +153,18 @@ func mustNewClient(_ *testing.T) *Client {
 }
 
 func TestClient_Create_And_Get(t *testing.T) {
-	t.Run("normal", func(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
 		c := mustNewClient(t)
 
 		var createResp CreateResponse
 		var createErr error
+		var calls int
 
 		c.Create(
 			"/workers01", []byte("data01"), FlagEphemeral,
 			WorldACL(PermAll),
 			func(resp CreateResponse, err error) {
+				calls++
 				createResp = resp
 				createErr = err
 			},
@@ -169,11 +172,71 @@ func TestClient_Create_And_Get(t *testing.T) {
 		c.Close()
 
 		assert.Equal(t, nil, createErr)
+		assert.Equal(t, 1, calls)
 
 		assert.Greater(t, createResp.Zxid, int64(0))
 		createResp.Zxid = 0
 		assert.Equal(t, CreateResponse{
 			Path: "/workers01",
 		}, createResp)
+	})
+
+	t.Run("get children", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			nil,
+		)
+
+		c.Create(
+			"/workers02", []byte("data02"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp-02")
+			},
+		)
+
+		c.Create(
+			"/workers03", []byte("data03"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp-03")
+			},
+		)
+
+		var childrenResp ChildrenResponse
+		var childrenErr error
+
+		c.Children("/", func(resp ChildrenResponse, err error) {
+			steps = append(steps, "children")
+			childrenResp = resp
+			childrenErr = err
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-resp-02",
+			"create-resp-03",
+			"children",
+		}, steps)
+		assert.Equal(t, nil, childrenErr)
+
+		assert.Greater(t, childrenResp.Zxid, int64(0))
+		childrenResp.Zxid = 0
+
+		slices.Sort(childrenResp.Children)
+		assert.Equal(t, ChildrenResponse{
+			Children: []string{
+				"workers01",
+				"workers02",
+				"workers03",
+				"zookeeper",
+			},
+		}, childrenResp)
 	})
 }

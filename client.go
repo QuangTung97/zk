@@ -682,7 +682,8 @@ func (c *Client) readSingleData(conn tcpConn) {
 	if res.Err != 0 {
 		err = res.Err.toError()
 	} else {
-		_, err = decodePacket(buf[16:blen], req.response)
+		const responseHeaderSize = 16
+		_, err = decodePacket(buf[responseHeaderSize:blen], req.response)
 	}
 	c.mut.Lock()
 
@@ -734,8 +735,47 @@ func (c *Client) Create(
 		},
 		&createResponse{},
 		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(CreateResponse{}, err)
+				return
+			}
 			r := resp.(*createResponse)
-			callback(CreateResponse{Path: r.Path, Zxid: zxid}, err)
+			callback(CreateResponse{Path: r.Path, Zxid: zxid}, nil)
+		},
+	)
+}
+
+type ChildrenResponse struct {
+	Zxid     int64
+	Children []string
+}
+
+func (c *Client) Children(
+	path string,
+	callback func(resp ChildrenResponse, err error),
+) {
+	c.enqueueRequest(
+		opGetChildren2,
+		&getChildren2Request{
+			Path: path,
+		},
+		&getChildren2Response{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(ChildrenResponse{}, err)
+				return
+			}
+			r := resp.(*getChildren2Response)
+			callback(ChildrenResponse{
+				Zxid:     zxid,
+				Children: r.Children,
+			}, nil)
 		},
 	)
 }
