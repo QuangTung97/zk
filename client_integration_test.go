@@ -769,23 +769,32 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 
 		_ = c.conn.Close()
 
+		var mut sync.Mutex
 		var createErr error
 		c.Create("/workers01",
 			nil, 0, WorldACL(PermAll),
 			func(resp CreateResponse, err error) {
 				steps = append(steps, "create01")
+				mut.Lock()
 				createErr = err
+				mut.Unlock()
 			},
 		)
 
 		time.Sleep(500 * time.Millisecond)
-		assert.Equal(t, ErrConnectionClosed, createErr)
+
+		mut.Lock()
+		err := createErr
+		mut.Unlock()
+		assert.Equal(t, ErrConnectionClosed, err)
 
 		c.Create("/workers01",
 			nil, 0, WorldACL(PermAll),
 			func(resp CreateResponse, err error) {
 				steps = append(steps, "create02")
+				mut.Lock()
 				createErr = err
+				mut.Unlock()
 			},
 		)
 

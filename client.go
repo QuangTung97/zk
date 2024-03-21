@@ -643,8 +643,12 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) error {
 func (c *Client) readSingleData(conn tcpConn) {
 	buf := c.readCodec.buf
 
+	c.mut.Lock()
+	recvTimeout := c.recvTimeout
+	c.mut.Unlock()
+
 	// read package length
-	_ = conn.SetReadDeadline(c.recvTimeout)
+	_ = conn.SetReadDeadline(recvTimeout)
 	_, err := io.ReadFull(conn, buf[:4])
 	if err != nil {
 		c.disconnectAndClose(conn)
@@ -657,7 +661,7 @@ func (c *Client) readSingleData(conn tcpConn) {
 		return
 	}
 
-	_ = conn.SetReadDeadline(c.recvTimeout)
+	_ = conn.SetReadDeadline(recvTimeout)
 	_, err = io.ReadFull(conn, buf[:blen])
 	_ = conn.SetReadDeadline(0)
 	if err != nil {
