@@ -302,4 +302,53 @@ func TestClient_Create_And_Get(t *testing.T) {
 			Path:  "/",
 		}, watchEvent)
 	})
+
+	t.Run("get data", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-workers01")
+			},
+		)
+
+		var getResp GetResponse
+		var getErr error
+		c.Get("/workers01", func(resp GetResponse, err error) {
+			steps = append(steps, "get-resp")
+			getResp = resp
+			getErr = err
+		})
+
+		var getErr2 error
+		c.Get("/workers02", func(resp GetResponse, err error) {
+			steps = append(steps, "get-not-found")
+			getErr2 = err
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-workers01",
+			"get-resp",
+			"get-not-found",
+		}, steps)
+
+		// check response found
+		assert.Equal(t, nil, getErr)
+
+		assert.Greater(t, getResp.Zxid, int64(0))
+		getResp.Zxid = 0
+
+		assert.Equal(t, GetResponse{
+			Data: []byte("data01"),
+		}, getResp)
+
+		// check response not found
+		assert.Equal(t, ErrNoNode, getErr2)
+	})
 }

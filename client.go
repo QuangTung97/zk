@@ -825,3 +825,38 @@ func (c *Client) Children(
 		watch,
 	)
 }
+
+type GetResponse struct {
+	Zxid int64
+	Data []byte
+}
+
+func (c *Client) Get(
+	path string,
+	callback func(resp GetResponse, err error),
+) {
+	watch := clientWatchRequest{}
+
+	c.enqueueRequestWithWatcher(
+		opGetData,
+		&getDataRequest{
+			Path: path,
+		},
+		&getDataResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(GetResponse{}, err)
+				return
+			}
+			r := resp.(*getDataResponse)
+			callback(GetResponse{
+				Zxid: zxid,
+				Data: r.Data,
+			}, nil)
+		},
+		watch,
+	)
+}
