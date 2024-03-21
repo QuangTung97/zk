@@ -622,7 +622,6 @@ func (c *Client) readSingleData(conn tcpConn) {
 
 		c.mut.Lock()
 
-		// TODO get from watchers
 		watchTypes := computeWatchTypes(watchResp.Type)
 		var callbacks []func(ev clientWatchEvent)
 		for _, wType := range watchTypes {
@@ -829,18 +828,62 @@ func (c *Client) Children(
 type GetResponse struct {
 	Zxid int64
 	Data []byte
+	Stat Stat
+}
+
+type getOpts struct {
+	watch         bool
+	watchCallback func(ev Event)
+}
+
+type GetOption func(opts *getOpts)
+
+func WithGetWatch(callback func(ev Event)) GetOption {
+	return func(opts *getOpts) {
+		if callback == nil {
+			return
+		}
+		opts.watch = true
+		opts.watchCallback = callback
+	}
 }
 
 func (c *Client) Get(
 	path string,
 	callback func(resp GetResponse, err error),
+	options ...GetOption,
 ) {
+	opts := getOpts{
+		watch: false,
+	}
+	for _, fn := range options {
+		fn(&opts)
+	}
+
 	watch := clientWatchRequest{}
+	if opts.watch {
+		watch = clientWatchRequest{
+			pathType: watchPathType{
+				path:  path,
+				wType: watchTypeData,
+			},
+			callback: func(ev clientWatchEvent) {
+				opts.watchCallback(Event{
+					Type:   ev.Type,
+					State:  ev.State,
+					Path:   ev.Path,
+					Err:    ev.Err,
+					Server: ev.Server,
+				})
+			},
+		}
+	}
 
 	c.enqueueRequestWithWatcher(
 		opGetData,
 		&getDataRequest{
-			Path: path,
+			Path:  path,
+			Watch: opts.watch,
 		},
 		&getDataResponse{},
 		func(resp any, zxid int64, err error) {
@@ -855,8 +898,43 @@ func (c *Client) Get(
 			callback(GetResponse{
 				Zxid: zxid,
 				Data: r.Data,
+				Stat: r.Stat,
 			}, nil)
 		},
 		watch,
+	)
+}
+
+type SetResponse struct {
+	Zxid int64
+	Stat Stat
+}
+
+func (c *Client) Set(
+	path string, data []byte, version int32,
+	callback func(resp SetResponse, err error),
+) {
+	c.enqueueRequest(
+		opSetData,
+		&SetDataRequest{
+			Path:    path,
+			Data:    data,
+			Version: version,
+		},
+		&setDataResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(SetResponse{}, err)
+				return
+			}
+			r := resp.(*setDataResponse)
+			callback(SetResponse{
+				Zxid: zxid,
+				Stat: r.Stat,
+			}, nil)
+		},
 	)
 }
