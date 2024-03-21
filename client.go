@@ -582,72 +582,33 @@ func (c *Client) readSingleData(conn tcpConn) {
 	_ = conn.SetReadDeadline(c.recvTimeout)
 	_, err := io.ReadFull(conn, buf[:4])
 	if err != nil {
-		// TODO check error
+		c.disconnectAndClose(conn)
 		return
 	}
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
 	if len(buf) < blen {
-		// TODO Handle Len too Long
+		c.disconnectAndClose(conn)
+		return
 	}
 
 	_ = conn.SetReadDeadline(c.recvTimeout)
 	_, err = io.ReadFull(conn, buf[:blen])
 	_ = conn.SetReadDeadline(0)
 	if err != nil {
-		// TODO Handle Error
+		c.disconnectAndClose(conn)
 		return
 	}
 
 	res := responseHeader{}
 	_, err = decodePacket(buf[:16], &res)
 	if err != nil {
-		// TODO Handle Error
+		c.disconnectAndClose(conn)
 		return
 	}
 
 	if res.Xid == -1 {
-		watchResp := &watcherEvent{}
-		_, err = decodePacket(buf[16:blen], watchResp)
-		if err != nil {
-			// TODO Handle Decode Error
-			return
-		}
-		ev := clientWatchEvent{
-			Type:  watchResp.Type,
-			State: watchResp.State,
-			Path:  watchResp.Path,
-			Err:   nil,
-		}
-
-		c.mut.Lock()
-
-		watchTypes := computeWatchTypes(watchResp.Type)
-		var callbacks []func(ev clientWatchEvent)
-		for _, wType := range watchTypes {
-			wpt := watchPathType{path: ev.Path, wType: wType}
-			callbacks = append(callbacks, c.watchers[wpt]...)
-			delete(c.watchers, wpt)
-		}
-
-		c.handleQueue = append(c.handleQueue, handleEvent{
-			state: c.state,
-			zxid:  res.Zxid,
-			req: clientRequest{
-				xid:      -1,
-				opcode:   opWatcherEvent,
-				response: &ev,
-				callback: func(res any, zxid int64, err error) {
-					ev := res.(*clientWatchEvent)
-					for _, cb := range callbacks {
-						cb(*ev)
-					}
-				},
-			},
-			err: res.Err.toError(),
-		})
-		c.handleCond.Signal()
-		c.mut.Unlock()
+		c.handleWatchEvent(conn, buf[:], blen, res)
 		return
 	}
 	if res.Xid == -2 {
@@ -660,6 +621,10 @@ func (c *Client) readSingleData(conn tcpConn) {
 		return
 	}
 
+	c.handleNormalResponse(res, buf[:], blen)
+}
+
+func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -678,12 +643,16 @@ func (c *Client) readSingleData(conn tcpConn) {
 	}
 
 	c.mut.Unlock()
+
+	// not need to decode in a mutex lock
+	var err error
 	if res.Err != 0 {
 		err = res.Err.toError()
 	} else {
 		const responseHeaderSize = 16
 		_, err = decodePacket(buf[responseHeaderSize:blen], req.response)
 	}
+
 	c.mut.Lock()
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
@@ -691,6 +660,50 @@ func (c *Client) readSingleData(conn tcpConn) {
 		zxid:  res.Zxid,
 		req:   req,
 		err:   err,
+	})
+	c.handleCond.Signal()
+}
+
+func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res responseHeader) {
+	watchResp := &watcherEvent{}
+	_, err := decodePacket(buf[16:blen], watchResp)
+	if err != nil {
+		c.disconnectAndClose(conn)
+		return
+	}
+	ev := clientWatchEvent{
+		Type:  watchResp.Type,
+		State: watchResp.State,
+		Path:  watchResp.Path,
+		Err:   nil,
+	}
+
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	watchTypes := computeWatchTypes(watchResp.Type)
+	var callbacks []func(ev clientWatchEvent)
+	for _, wType := range watchTypes {
+		wpt := watchPathType{path: ev.Path, wType: wType}
+		callbacks = append(callbacks, c.watchers[wpt]...)
+		delete(c.watchers, wpt)
+	}
+
+	c.handleQueue = append(c.handleQueue, handleEvent{
+		state: c.state,
+		zxid:  res.Zxid,
+		req: clientRequest{
+			xid:      -1,
+			opcode:   opWatcherEvent,
+			response: &ev,
+			callback: func(res any, zxid int64, err error) {
+				ev := res.(*clientWatchEvent)
+				for _, cb := range callbacks {
+					cb(*ev)
+				}
+			},
+		},
+		err: res.Err.toError(),
 	})
 	c.handleCond.Signal()
 }
