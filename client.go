@@ -223,43 +223,74 @@ func (c *tcpConnImpl) Close() error {
 }
 
 func (c *Client) tryToConnect() tcpConn {
-	c.mut.Lock()
-	defer c.mut.Unlock()
+	for {
+		conn, ok := c.doConnect()
+		if ok {
+			return conn
+		}
 
+		c.mut.Lock()
+		shutdown := c.sendShutdown
+		c.mut.Unlock()
+
+		if shutdown {
+			c.mut.Lock()
+			c.recvShutdown = true
+			c.recvCond.Signal()
+			c.mut.Unlock()
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (c *Client) doConnect() (tcpConn, bool) {
+	c.mut.Lock()
 	if c.state == StateHasSession {
-		return c.conn
+		c.mut.Unlock()
+		return c.conn, true
 	}
 	c.state = StateConnecting
-
 	c.mut.Unlock()
+
 	netConn, err := net.Dial("tcp", c.servers[0])
 	if err != nil {
-		// TODO Handle
-		panic(err)
+		c.mut.Lock()
+		c.state = StateDisconnected
+		c.mut.Unlock()
+		return nil, false
 	}
 
 	conn := &tcpConnImpl{
 		conn: netConn,
 	}
+
 	c.mut.Lock()
-
 	c.state = StateConnected
-
 	c.mut.Unlock()
+
 	err = c.authenticate(conn)
 	if err != nil {
-		// TODO Handle error
-		panic(err)
+		c.mut.Lock()
+		c.state = StateDisconnected
+		c.mut.Unlock()
+		_ = netConn.Close()
+		return nil, false
 	}
-	c.mut.Lock()
 
+	c.mut.Lock()
 	c.conn = conn
-	return conn
+	c.mut.Unlock()
+
+	return conn, true
 }
 
 func (c *Client) runSender() {
 	for {
 		conn := c.tryToConnect()
+		if conn == nil {
+			return
+		}
 
 		requests, ok := c.getFromSendQueue()
 		if !ok {
@@ -273,7 +304,6 @@ func (c *Client) runSender() {
 				break
 			}
 		}
-
 	}
 }
 
@@ -671,6 +701,7 @@ func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res respon
 		c.disconnectAndClose(conn)
 		return
 	}
+
 	ev := clientWatchEvent{
 		Type:  watchResp.Type,
 		State: watchResp.State,

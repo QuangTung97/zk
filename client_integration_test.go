@@ -712,3 +712,17 @@ func checkStat(t *testing.T, st *Stat) {
 	assert.Greater(t, st.Pzxid, int64(0))
 	*st = Stat{}
 }
+
+func TestClient_Close_When_Not_Connected(t *testing.T) {
+	c, err := NewClient(
+		[]string{"localhost:1800"}, 30*time.Second,
+		WithSessionEstablishedCallback(func() {
+		}),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	c.Close()
+	assert.Equal(t, StateDisconnected, c.state)
+}
