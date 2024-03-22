@@ -445,6 +445,86 @@ func TestClient_Authenticate(t *testing.T) {
 			response: &setWatchesResponse{},
 		}, c.client.sendQueue[1])
 	})
+
+	t.Run("session reconnect reapply auth infos", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		c.client.AddAuth("digest", []byte("user01:password01"),
+			func(resp AddAuthResponse, err error) {
+			},
+		)
+		c.client.AddAuth("digest", []byte("user02:password02"),
+			func(resp AddAuthResponse, err error) {
+			},
+		)
+
+		// check send queue and creds
+		assert.Equal(t, 2, len(c.client.sendQueue))
+		assert.Equal(t, []authCreds{
+			{
+				scheme: "digest",
+				auth:   []byte("user01:password01"),
+			},
+			{
+				scheme: "digest",
+				auth:   []byte("user02:password02"),
+			},
+		}, c.client.creds)
+
+		// disconnect
+		c.client.disconnectAndClose(conn)
+
+		resp := connectResponse{
+			TimeOut:   12000,
+			SessionID: 3400,
+			Passwd:    []byte("new-pass"),
+		}
+		// write connectResponse to test connection
+		_, err := encodeObject[connectResponse](&resp, &c.codec, &c.conn.readBuf)
+		assert.Equal(t, nil, err)
+
+		err = c.client.authenticate(c.conn)
+		assert.Equal(t, nil, err)
+
+		// check state
+		assert.Equal(t, StateHasSession, c.client.state)
+		assert.Equal(t, 0, len(c.client.watchers))
+		assert.Equal(t, 2, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.handleQueue))
+
+		assert.Equal(t, 2, len(c.client.creds))
+
+		queue := c.client.sendQueue
+		queue[0].callback = nil
+		assert.Equal(t, clientRequest{
+			xid:    3,
+			opcode: 100, // opSetAuth
+			request: &setAuthRequest{
+				Scheme: "digest",
+				Auth:   []byte("user01:password01"),
+			},
+			response: &setAuthResponse{},
+		}, queue[0])
+
+		queue[1].callback = nil
+		assert.Equal(t, clientRequest{
+			xid:    4,
+			opcode: opSetAuth,
+			request: &setAuthRequest{
+				Scheme: "digest",
+				Auth:   []byte("user02:password02"),
+			},
+			response: &setAuthResponse{},
+		}, queue[1])
+	})
 }
 
 func TestClient_DisconnectAndClose(t *testing.T) {

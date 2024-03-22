@@ -84,6 +84,7 @@ type Client struct {
 
 	conn tcpConn
 
+	creds    []authCreds
 	watchers map[watchPathType][]func(ev clientWatchEvent)
 	// =================================
 
@@ -466,7 +467,7 @@ func (c *Client) authenticate(conn tcpConn) error {
 
 	c.handleGlobalCallbacks(prevIsZero)
 
-	// TODO Reapply ACL
+	c.reapplyAuthCreds()
 	c.reapplyAllWatches()
 
 	c.mut.Unlock()
@@ -474,6 +475,24 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.recvCond.Signal()
 
 	return nil
+}
+
+func (c *Client) reapplyAuthCreds() {
+	for _, cred := range c.creds {
+		c.enqueueAlreadyLocked(
+			opSetAuth,
+			&setAuthRequest{
+				Type:   0,
+				Scheme: cred.scheme,
+				Auth:   cred.auth,
+			},
+			&setAuthResponse{},
+			func(resp any, zxid int64, err error) {
+			},
+			clientWatchRequest{},
+			false,
+		)
+	}
 }
 
 func (c *Client) appendHandleQueueGlobalEvent(callback func()) {
@@ -570,6 +589,7 @@ func (c *Client) reapplyAllWatches() {
 			opSetWatches, req, &setWatchesResponse{},
 			func(resp any, zxid int64, err error) {},
 			clientWatchRequest{},
+			false,
 		)
 	}
 }
@@ -597,13 +617,13 @@ func (c *Client) enqueueRequestWithWatcher(
 		return
 	}
 
-	c.enqueueAlreadyLocked(opCode, request, response, callback, watch)
+	c.enqueueAlreadyLocked(opCode, request, response, callback, watch, true)
 }
 
 func (c *Client) enqueueAlreadyLocked(
 	opCode int32, request any, response any,
 	callback func(resp any, zxid int64, err error),
-	watch clientWatchRequest,
+	watch clientWatchRequest, setAuth bool,
 ) {
 	req := clientRequest{
 		xid:      c.nextXid(),
@@ -614,7 +634,13 @@ func (c *Client) enqueueAlreadyLocked(
 		callback: callback,
 	}
 
-	// TODO Check OpCode is Set Auth
+	if setAuth && opCode == opSetAuth {
+		r := request.(*setAuthRequest)
+		c.creds = append(c.creds, authCreds{
+			scheme: r.Scheme,
+			auth:   r.Auth,
+		})
+	}
 
 	pathType := watch.pathType
 	if len(pathType.path) > 0 {
@@ -878,7 +904,11 @@ func (c *Client) Close() {
 	c.mut.Lock()
 
 	c.sendShutdown = true
-	c.enqueueAlreadyLocked(opClose, &closeRequest{}, &closeResponse{}, nil, clientWatchRequest{})
+	c.enqueueAlreadyLocked(
+		opClose, &closeRequest{}, &closeResponse{},
+		nil, clientWatchRequest{},
+		false,
+	)
 
 	conn := c.conn
 	c.mut.Unlock()
@@ -1299,6 +1329,7 @@ type GetACLResponse struct {
 	Stat Stat
 }
 
+// GetACL returns ACL for a znode
 func (c *Client) GetACL(
 	path string,
 	callback func(resp GetACLResponse, err error),
