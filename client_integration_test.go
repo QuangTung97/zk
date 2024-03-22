@@ -1278,6 +1278,63 @@ func TestClientInternal_ACL(t *testing.T) {
 		assert.Equal(t, []ACL(nil), resp.ACL)
 		assert.Equal(t, int32(0), resp.Stat.Aversion)
 	})
+
+	t.Run("set acl mismatch version", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var respErrors []error
+
+		pathVal := "/workers01"
+
+		c.Create(
+			pathVal, []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		c.SetACL(
+			pathVal,
+			DigestACL(PermRead, "user01", "password01"), 0,
+			func(resp SetACLResponse, err error) {
+				steps = append(steps, "set-acl")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		c.SetACL(
+			pathVal,
+			DigestACL(PermRead, "user02", "password02"), 0,
+			func(resp SetACLResponse, err error) {
+				steps = append(steps, "set-acl2")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		c.Set(pathVal, []byte("new-data"), 0, func(resp SetResponse, err error) {
+			steps = append(steps, "set-data")
+			respErrors = append(respErrors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create",
+			"set-acl",
+			"set-acl2",
+			"set-data",
+		}, steps)
+
+		assert.Equal(t, []error{
+			nil,
+			nil,
+			ErrBadVersion,
+			nil,
+		}, respErrors)
+	})
 }
 
 func TestClientIntegration_Ping(t *testing.T) {
