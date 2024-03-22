@@ -74,8 +74,8 @@ type clientTest struct {
 	codec  codecBuffer
 }
 
-func newClientTest(_ *testing.T) *clientTest {
-	c, err := newClientInternal([]string{"server01"}, 6*time.Second)
+func newClientTest(_ *testing.T, options ...Option) *clientTest {
+	c, err := newClientInternal([]string{"server01"}, 6*time.Second, options...)
 	if err != nil {
 		panic(err)
 	}
@@ -213,6 +213,88 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, int64(0), c.client.lastZxid)
 		assert.Equal(t, int32(6000), c.client.sessionTimeoutMs)
 		assert.Equal(t, int64(0), c.client.sessionID)
+	})
+
+	t.Run("handle session expired add on expired to handle queue", func(t *testing.T) {
+		calls := 0
+		c := newClientTest(t,
+			WithSessionExpiredCallback(func() {
+				calls++
+			}),
+		)
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateDisconnected
+
+		var err error
+
+		resp := connectResponse{
+			TimeOut: 12000,
+		}
+		// write connectResponse to test connection
+		_, err = encodeObject[connectResponse](&resp, &c.codec, &c.conn.readBuf)
+		assert.Equal(t, nil, err)
+
+		err = c.client.authenticate(c.conn)
+		assert.Equal(t, ErrSessionExpired, err)
+
+		// check state
+		assert.Equal(t, StateExpired, c.client.state)
+
+		queue := c.client.handleQueue
+		assert.Equal(t, 1, len(queue))
+
+		assert.Equal(t, 0, calls)
+		queue[0].req.callback(nil, 0, nil)
+		assert.Equal(t, 1, calls)
+
+		queue[0].req.callback = nil
+		assert.Equal(t, handleEvent{
+			state: StateExpired,
+			req: clientRequest{
+				opcode: opWatcherEvent,
+			},
+		}, queue[0])
+	})
+
+	t.Run("session expired remove watches", func(t *testing.T) {
+		c := newClientTest(t)
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateDisconnected
+
+		c.client.Get(
+			"/workers01", func(resp GetResponse, err error) {},
+			WithGetWatch(func(ev Event) {}),
+		)
+		c.client.Get(
+			"/workers02", func(resp GetResponse, err error) {},
+			WithGetWatch(func(ev Event) {}),
+		)
+		assert.Equal(t, 0, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 2, len(c.client.handleQueue))
+
+		var err error
+
+		resp := connectResponse{
+			TimeOut: 12000,
+		}
+		// write connectResponse to test connection
+		_, err = encodeObject[connectResponse](&resp, &c.codec, &c.conn.readBuf)
+		assert.Equal(t, nil, err)
+
+		err = c.client.authenticate(c.conn)
+		assert.Equal(t, ErrSessionExpired, err)
+
+		// check state
+		assert.Equal(t, StateExpired, c.client.state)
+		assert.Equal(t, 0, len(c.client.watchers))
+		assert.Equal(t, 2, len(c.client.handleQueue))
 	})
 }
 

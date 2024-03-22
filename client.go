@@ -48,6 +48,7 @@ type Client struct {
 	authReadCodec codecBuffer // not need to lock
 
 	sessEstablishedCallback func()
+	sessExpiredCallback     func()
 	reconnectingCallback    func()
 
 	lastZxid int64
@@ -95,6 +96,12 @@ type Option func(c *Client)
 func WithSessionEstablishedCallback(callback func()) Option {
 	return func(c *Client) {
 		c.sessEstablishedCallback = callback
+	}
+}
+
+func WithSessionExpiredCallback(callback func()) Option {
+	return func(c *Client) {
+		c.sessExpiredCallback = callback
 	}
 }
 
@@ -438,7 +445,11 @@ func (c *Client) authenticate(conn tcpConn) error {
 		c.lastZxid = 0
 		c.state = StateExpired
 
-		// TODO Clear Watch
+		if c.sessExpiredCallback != nil {
+			c.appendHandleQueueGlobalEvent(c.sessExpiredCallback)
+		}
+
+		c.watchers = map[watchPathType][]func(ev clientWatchEvent){}
 
 		c.mut.Unlock()
 
@@ -463,6 +474,20 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.recvCond.Signal()
 
 	return nil
+}
+
+func (c *Client) appendHandleQueueGlobalEvent(callback func()) {
+	c.handleQueue = append(c.handleQueue, handleEvent{
+		state: c.state,
+		req: clientRequest{
+			opcode:   opWatcherEvent,
+			response: nil,
+			callback: func(res any, zxid int64, err error) {
+				callback()
+			},
+		},
+	})
+	c.handleCond.Signal()
 }
 
 func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
@@ -504,6 +529,7 @@ func (c *Client) reapplyAllWatches() {
 		RelativeZxid: c.lastZxid,
 	}
 
+	// TODO Batching by Smaller Batches
 	for wpt := range c.watchers {
 		switch wpt.wType {
 		case watchTypeExist:
