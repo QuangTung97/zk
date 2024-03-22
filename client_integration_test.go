@@ -78,7 +78,7 @@ func mustNewClient(_ *testing.T, inputOptions ...Option) *Client {
 	ch := make(chan struct{}, 1)
 
 	opts := []Option{
-		WithSessionEstablishedCallback(func() {
+		WithSessionEstablishedCallback(func(c *Client) {
 			select {
 			case ch <- struct{}{}:
 			default:
@@ -766,7 +766,7 @@ func checkStat(t *testing.T, st *Stat) {
 func TestClientIntegration_Close_When_Not_Connected(t *testing.T) {
 	c, err := NewClient(
 		[]string{"localhost:1800"}, 30*time.Second,
-		WithSessionEstablishedCallback(func() {
+		WithSessionEstablishedCallback(func(c *Client) {
 		}),
 	)
 	if err != nil {
@@ -860,7 +860,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		var reconnectCalls int
 		c := mustNewClient(t,
 			WithDialRetryDuration(100*time.Millisecond),
-			WithReconnectingCallback(func() {
+			WithReconnectingCallback(func(c *Client) {
 				reconnectCalls++
 			}),
 		)
@@ -949,7 +949,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		var reconnectCalls int
 		c := mustNewClient(t,
 			WithDialRetryDuration(100*time.Millisecond),
-			WithReconnectingCallback(func() {
+			WithReconnectingCallback(func(c *Client) {
 				reconnectCalls++
 			}),
 		)
@@ -1012,7 +1012,7 @@ func TestClientInternal_WithSessionExpired(t *testing.T) {
 		var calls int
 
 		c, err := NewClient([]string{"localhost"}, 4*time.Second,
-			WithSessionEstablishedCallback(func() {
+			WithSessionEstablishedCallback(func(c *Client) {
 				calls++
 				select {
 				case ch <- struct{}{}:

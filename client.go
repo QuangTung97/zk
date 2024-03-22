@@ -52,9 +52,9 @@ type Client struct {
 	readCodec     codecBuffer // not need to lock
 	authReadCodec codecBuffer // not need to lock
 
-	sessEstablishedCallback func()
-	sessExpiredCallback     func()
-	reconnectingCallback    func()
+	sessEstablishedCallback func(c *Client)
+	sessExpiredCallback     func(c *Client)
+	reconnectingCallback    func(c *Client)
 
 	lastZxid int64
 
@@ -102,19 +102,19 @@ type Client struct {
 // Option ...
 type Option func(c *Client)
 
-func WithSessionEstablishedCallback(callback func()) Option {
+func WithSessionEstablishedCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.sessEstablishedCallback = callback
 	}
 }
 
-func WithSessionExpiredCallback(callback func()) Option {
+func WithSessionExpiredCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.sessExpiredCallback = callback
 	}
 }
 
-func WithReconnectingCallback(callback func()) Option {
+func WithReconnectingCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.reconnectingCallback = callback
 	}
@@ -543,14 +543,14 @@ func (c *Client) reapplyAuthCreds() {
 	}
 }
 
-func (c *Client) appendHandleQueueGlobalEvent(callback func()) {
+func (c *Client) appendHandleQueueGlobalEvent(callback func(c *Client)) {
 	c.handleQueue = append(c.handleQueue, handleEvent{
 		state: c.state,
 		req: clientRequest{
 			opcode:   opWatcherEvent,
 			response: nil,
 			callback: func(res any, zxid int64, err error) {
-				callback()
+				callback(c)
 			},
 		},
 	})
@@ -566,7 +566,7 @@ func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 				opcode:   opWatcherEvent,
 				response: nil,
 				callback: func(res any, zxid int64, err error) {
-					c.sessEstablishedCallback()
+					c.sessEstablishedCallback(c)
 				},
 			},
 		})
@@ -581,7 +581,7 @@ func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 				opcode:   opWatcherEvent,
 				response: nil,
 				callback: func(res any, zxid int64, err error) {
-					c.reconnectingCallback()
+					c.reconnectingCallback(c)
 				},
 			},
 		})

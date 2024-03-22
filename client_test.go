@@ -222,7 +222,7 @@ func TestClient_Authenticate(t *testing.T) {
 	t.Run("handle session expired add on expired to handle queue", func(t *testing.T) {
 		calls := 0
 		c := newClientTest(t,
-			WithSessionExpiredCallback(func() {
+			WithSessionExpiredCallback(func(c *Client) {
 				calls++
 			}),
 		)
