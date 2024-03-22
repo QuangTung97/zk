@@ -650,6 +650,69 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 			Path:  "/workers01",
 		}, watchEvent)
 	})
+
+	t.Run("create children of ephemeral", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Create(
+			"/workers01/child", []byte("data02"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-child")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create",
+			"create-child",
+		}, steps)
+
+		assert.Equal(t, []error{
+			nil,
+			ErrNoChildrenForEphemerals,
+		}, errors)
+	})
+
+	t.Run("create children of non-existed parent node", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		c.Create(
+			"/workers01/child", []byte("data02"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-child")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-child",
+		}, steps)
+
+		assert.Equal(t, []error{
+			ErrNoNode,
+		}, errors)
+	})
 }
 
 func checkStat(t *testing.T, st *Stat) {
@@ -1115,13 +1178,7 @@ func TestClientInternal_ACL(t *testing.T) {
 		}, respErrors)
 
 		resp := aclResp[0]
-		assert.Equal(t, []ACL{
-			{
-				Perms:  PermRead,
-				Scheme: "digest",
-				ID:     "user01:x",
-			},
-		}, resp.ACL)
+		assert.Equal(t, []ACL(nil), resp.ACL)
 		assert.Equal(t, int32(0), resp.Stat.Aversion)
 	})
 }
