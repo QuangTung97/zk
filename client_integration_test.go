@@ -944,6 +944,64 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 
 		assert.Equal(t, 1, reconnectCalls)
 	})
+
+	t.Run("check creds re-apply", func(t *testing.T) {
+		var reconnectCalls int
+		c := mustNewClient(t,
+			WithDialRetryDuration(100*time.Millisecond),
+			WithReconnectingCallback(func() {
+				reconnectCalls++
+			}),
+		)
+
+		var steps []string
+		var errors []error
+
+		c.AddAuth("digest", []byte("user01:password01"), func(resp AddAuthResponse, err error) {
+			steps = append(steps, "add-auth")
+			errors = append(errors, err)
+		})
+
+		ch := make(chan struct{})
+		c.Create("/workers01",
+			[]byte("data01"), FlagEphemeral, DigestACL(PermRead, "user01", "password01"),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				errors = append(errors, err)
+				close(ch)
+			},
+		)
+		<-ch
+
+		_ = c.conn.Close()
+
+		time.Sleep(500 * time.Millisecond)
+
+		var getResp GetResponse
+		c.Get("/workers01",
+			func(resp GetResponse, err error) {
+				steps = append(steps, "get-resp")
+				getResp = resp
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"add-auth",
+			"create",
+			"get-resp",
+		}, steps)
+		assert.Equal(t, []error{
+			nil,
+			nil,
+			nil,
+		}, errors)
+
+		assert.Equal(t, 1, reconnectCalls)
+		assert.Equal(t, []byte("data01"), getResp.Data)
+	})
 }
 
 func TestClientInternal_WithSessionExpired(t *testing.T) {
