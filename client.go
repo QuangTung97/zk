@@ -335,6 +335,11 @@ func (c *Client) runSender() {
 			return
 		}
 
+		select {
+		case c.pingSignalChan <- struct{}{}:
+		default:
+		}
+
 		for _, req := range requests {
 			err := c.sendData(conn, req)
 			if err != nil {
