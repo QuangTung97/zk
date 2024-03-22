@@ -492,6 +492,7 @@ func (c *Client) appendHandleQueueGlobalEvent(callback func()) {
 
 func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 	if c.sessEstablishedCallback != nil && prevIsZero {
+		// TODO Unit Test & Refactor
 		c.handleQueue = append(c.handleQueue, handleEvent{
 			state: StateHasSession,
 			req: clientRequest{
@@ -506,6 +507,7 @@ func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 	}
 
 	if c.reconnectingCallback != nil && !prevIsZero {
+		// TODO Unit Test & Refactor
 		c.handleQueue = append(c.handleQueue, handleEvent{
 			state: StateHasSession,
 			req: clientRequest{
@@ -612,6 +614,8 @@ func (c *Client) enqueueAlreadyLocked(
 		callback: callback,
 	}
 
+	// TODO Check OpCode is Set Auth
+
 	pathType := watch.pathType
 	if len(pathType.path) > 0 {
 		c.watchers[pathType] = append(c.watchers[pathType], watch.callback)
@@ -689,9 +693,11 @@ func (c *Client) disconnect(conn tcpConn) bool {
 	defer c.mut.Unlock()
 
 	if c.state != StateHasSession {
+		// TODO Testing
 		return false
 	}
 	if c.conn != conn {
+		// TODO Testing
 		return false
 	}
 
@@ -1214,6 +1220,75 @@ func (c *Client) Delete(
 			}
 			callback(DeleteResponse{
 				Zxid: zxid,
+			}, nil)
+		},
+	)
+}
+
+type AddAuthResponse struct {
+	Zxid int64
+}
+
+// AddAuth often used with "digest" scheme and auth = "username:password" (password is not hashed)
+func (c *Client) AddAuth(
+	scheme string, auth []byte,
+	callback func(resp AddAuthResponse, err error),
+) {
+	c.enqueueRequest(
+		opSetAuth,
+		&setAuthRequest{
+			Type:   0,
+			Scheme: scheme,
+			Auth:   auth,
+		},
+		&setAuthResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(AddAuthResponse{}, err)
+				return
+			}
+			callback(AddAuthResponse{
+				Zxid: zxid,
+			}, nil)
+		},
+	)
+}
+
+type SetACLResponse struct {
+	Zxid int64
+	Stat Stat
+}
+
+// SetACL set ACL to ZK
+// version is the ACL Version (Stat.Aversion), not a normal version number
+func (c *Client) SetACL(
+	path string, acl []ACL, version int32,
+	callback func(resp SetACLResponse, err error),
+) {
+	// TODO Testing
+	c.enqueueRequest(
+		opSetAcl,
+		&setAclRequest{
+			Path:    path,
+			Acl:     acl,
+			Version: version,
+		},
+		&setAclResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(SetACLResponse{}, err)
+				return
+			}
+			r := resp.(*setAclResponse)
+			callback(SetACLResponse{
+				Zxid: zxid,
+				Stat: r.Stat,
 			}, nil)
 		},
 	)

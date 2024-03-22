@@ -872,3 +872,79 @@ func TestClientInternal_WithSessionExpired(t *testing.T) {
 		assert.Equal(t, 1, calls)
 	})
 }
+
+func TestClientInternal_ACL(t *testing.T) {
+	t.Run("get auth failed", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var respErrors []error
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			DigestACL(PermAll, "user01", "password0"),
+			func(resp CreateResponse, err error) {
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		var getResp GetResponse
+		c.Get("/workers01", func(resp GetResponse, err error) {
+			getResp = resp
+			respErrors = append(respErrors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			nil,
+			ErrNoAuth,
+		}, respErrors)
+		assert.Equal(t, []byte(nil), getResp.Data)
+	})
+
+	t.Run("add auth get success", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var respErrors []error
+
+		c.AddAuth(
+			"digest", []byte("user01:password01"),
+			func(resp AddAuthResponse, err error) {
+				steps = append(steps, "add-auth")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		digestAcl := DigestACL(PermAll, "user01", "password01")
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			digestAcl,
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		var getResp GetResponse
+		c.Get("/workers01", func(resp GetResponse, err error) {
+			steps = append(steps, "get")
+			getResp = resp
+			respErrors = append(respErrors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"add-auth",
+			"create",
+			"get",
+		}, steps)
+
+		assert.Equal(t, []error{
+			nil,
+			nil,
+			nil,
+		}, respErrors)
+		assert.Equal(t, []byte("data01"), getResp.Data)
+	})
+}
