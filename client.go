@@ -560,33 +560,11 @@ func (c *Client) appendHandleQueueGlobalEvent(callback func(c *Client)) {
 
 func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 	if c.sessEstablishedCallback != nil && prevIsZero {
-		// TODO Unit Test & Refactor
-		c.handleQueue = append(c.handleQueue, handleEvent{
-			state: StateHasSession,
-			req: clientRequest{
-				opcode:   opWatcherEvent,
-				response: nil,
-				callback: func(res any, zxid int64, err error) {
-					c.sessEstablishedCallback(c)
-				},
-			},
-		})
-		c.handleCond.Signal()
+		c.appendHandleQueueGlobalEvent(c.sessEstablishedCallback)
 	}
 
 	if c.reconnectingCallback != nil && !prevIsZero {
-		// TODO Unit Test & Refactor
-		c.handleQueue = append(c.handleQueue, handleEvent{
-			state: StateHasSession,
-			req: clientRequest{
-				opcode:   opWatcherEvent,
-				response: nil,
-				callback: func(res any, zxid int64, err error) {
-					c.reconnectingCallback(c)
-				},
-			},
-		})
-		c.handleCond.Signal()
+		c.appendHandleQueueGlobalEvent(c.reconnectingCallback)
 	}
 }
 
