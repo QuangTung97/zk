@@ -1,4 +1,4 @@
-module github.com/go-zookeeper/zk
+module github.com/QuangTung97/zk
 
 go 1.19
 

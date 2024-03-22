@@ -596,6 +596,56 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 			ErrConnectionClosed,
 		}, getErrors)
 	})
+
+	t.Run("disconnect connection mismatch", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+		conn2 := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid.Store(8020)
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		c.client.disconnectAndClose(conn2)
+
+		assert.Equal(t, 0, conn.closeCalls)
+		assert.Equal(t, 0, conn2.closeCalls)
+		assert.Equal(t, StateHasSession, c.client.state)
+	})
+
+	t.Run("connection is connecting", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid.Store(8020)
+		c.client.state = StateConnecting
+		c.client.conn = nil
+
+		c.client.disconnectAndClose(conn)
+
+		assert.Equal(t, 0, conn.closeCalls)
+		assert.Equal(t, StateConnecting, c.client.state)
+	})
+
+	t.Run("panics with conn is nil", func(t *testing.T) {
+		c := newClientTest(t)
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid.Store(8020)
+		c.client.state = StateConnecting
+		c.client.conn = nil
+
+		assert.PanicsWithValue(t, "conn can not be nil", func() {
+			c.client.disconnectAndClose(nil)
+		})
+	})
 }
 
 func TestClient_SendData(t *testing.T) {
@@ -779,4 +829,24 @@ func TestClient_Ping(t *testing.T) {
 	assert.Equal(t, 0, len(c.client.sendQueue))
 	assert.Equal(t, 0, len(c.client.recvMap))
 	assert.Equal(t, 0, len(c.client.handleQueue))
+}
+
+func TestClient_Get_After_Expired(t *testing.T) {
+	c := newClientTest(t)
+
+	c.client.sessionID = 0
+	c.client.passwd = emptyPassword
+	c.client.lastZxid.Store(0)
+	c.client.state = StateExpired
+
+	var getErr error
+	c.client.Get("/workers01", func(resp GetResponse, err error) {
+		getErr = err
+	})
+
+	queue := c.client.handleQueue
+	assert.Equal(t, 1, len(queue))
+	c.client.handleEventCallback(queue[0])
+
+	assert.Equal(t, ErrSessionExpired, getErr)
 }

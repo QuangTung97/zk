@@ -762,11 +762,9 @@ func (c *Client) disconnect(conn tcpConn) bool {
 	defer c.mut.Unlock()
 
 	if c.state != StateHasSession {
-		// TODO Testing
 		return false
 	}
 	if c.conn != conn {
-		// TODO Testing
 		return false
 	}
 
@@ -871,7 +869,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	}
 
 	if !ok {
-		log.Printf("Response for unknown request with xid %d", res.Xid)
+		log.Printf("[ERROR] Response for unknown request with xid %d", res.Xid)
 		return
 	}
 

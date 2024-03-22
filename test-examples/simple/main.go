@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/go-zookeeper/zk"
+	"github.com/QuangTung97/zk"
 )
 
 func main() {

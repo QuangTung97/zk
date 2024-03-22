@@ -1301,3 +1301,18 @@ func TestClientIntegration_Ping_Multi_Times(t *testing.T) {
 
 	assert.Equal(t, 0, len(c.recvMap))
 }
+
+func TestClientIntegration_Delete_Empty_Node(t *testing.T) {
+	c := mustNewClient(t)
+
+	var errors []error
+	c.Delete("/workers01", 0, func(resp DeleteResponse, err error) {
+		errors = append(errors, err)
+	})
+
+	c.Close()
+
+	assert.Equal(t, []error{
+		ErrNoNode,
+	}, errors)
+}
