@@ -1268,7 +1268,6 @@ func (c *Client) SetACL(
 	path string, acl []ACL, version int32,
 	callback func(resp SetACLResponse, err error),
 ) {
-	// TODO Testing
 	c.enqueueRequest(
 		opSetAcl,
 		&setAclRequest{
@@ -1288,6 +1287,40 @@ func (c *Client) SetACL(
 			r := resp.(*setAclResponse)
 			callback(SetACLResponse{
 				Zxid: zxid,
+				Stat: r.Stat,
+			}, nil)
+		},
+	)
+}
+
+type GetACLResponse struct {
+	Zxid int64
+	ACL  []ACL
+	Stat Stat
+}
+
+func (c *Client) GetACL(
+	path string,
+	callback func(resp GetACLResponse, err error),
+) {
+	c.enqueueRequest(
+		opGetAcl,
+		&getAclRequest{
+			Path: path,
+		},
+		&getAclResponse{},
+		func(resp any, zxid int64, err error) {
+			if callback == nil {
+				return
+			}
+			if err != nil {
+				callback(GetACLResponse{}, err)
+				return
+			}
+			r := resp.(*getAclResponse)
+			callback(GetACLResponse{
+				Zxid: zxid,
+				ACL:  r.Acl,
 				Stat: r.Stat,
 			}, nil)
 		},
