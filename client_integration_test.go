@@ -1066,4 +1066,62 @@ func TestClientInternal_ACL(t *testing.T) {
 		}, resp.ACL)
 		assert.Equal(t, int32(0), resp.Stat.Aversion)
 	})
+
+	t.Run("get auth acl with wrong password", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var respErrors []error
+
+		c.AddAuth(
+			"digest", []byte("user01:password02"),
+			func(resp AddAuthResponse, err error) {
+				steps = append(steps, "add-auth")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		pathVal := "/workers01"
+
+		c.Create(
+			pathVal, []byte("data01"), FlagEphemeral,
+			DigestACL(PermRead, "user01", "password01"),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				respErrors = append(respErrors, err)
+			},
+		)
+
+		var aclResp []GetACLResponse
+
+		c.GetACL(pathVal, func(resp GetACLResponse, err error) {
+			steps = append(steps, "get-acl")
+			respErrors = append(respErrors, err)
+			aclResp = append(aclResp, resp)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"add-auth",
+			"create",
+			"get-acl",
+		}, steps)
+
+		assert.Equal(t, []error{
+			nil,
+			nil,
+			ErrNoAuth,
+		}, respErrors)
+
+		resp := aclResp[0]
+		assert.Equal(t, []ACL{
+			{
+				Perms:  PermRead,
+				Scheme: "digest",
+				ID:     "user01:x",
+			},
+		}, resp.ACL)
+		assert.Equal(t, int32(0), resp.Stat.Aversion)
+	})
 }
