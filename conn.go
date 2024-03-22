@@ -68,6 +68,7 @@ type authCreds struct {
 }
 
 // Conn is the client connection and tracks all details for communication with the server.
+// Deprecated
 type Conn struct {
 	lastZxid         int64
 	sessionID        int64
