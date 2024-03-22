@@ -713,6 +713,45 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 			ErrNoNode,
 		}, errors)
 	})
+
+	t.Run("create duplicated", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		pathVal := "/workers01"
+
+		c.Create(
+			pathVal, []byte("data01"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create01")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Create(
+			pathVal, []byte("data02"), FlagEphemeral,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create02")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create01",
+			"create02",
+		}, steps)
+
+		assert.Equal(t, []error{
+			nil,
+			ErrNodeExists,
+		}, errors)
+	})
 }
 
 func checkStat(t *testing.T, st *Stat) {
