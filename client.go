@@ -8,6 +8,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,7 +57,7 @@ type Client struct {
 	sessExpiredCallback     func(c *Client)
 	reconnectingCallback    func(c *Client)
 
-	lastZxid int64
+	lastZxid atomic.Int64
 
 	// =================================
 	// protect following fields
@@ -462,7 +463,7 @@ func (c *Client) nextXid() int32 {
 func (c *Client) authenticate(conn tcpConn) error {
 	req := &connectRequest{
 		ProtocolVersion: protocolVersion,
-		LastZxidSeen:    c.lastZxid,
+		LastZxidSeen:    c.lastZxid.Load(),
 		TimeOut:         c.sessionTimeoutMs,
 		SessionID:       c.sessionID,
 		Passwd:          c.passwd,
@@ -491,7 +492,7 @@ func (c *Client) authenticate(conn tcpConn) error {
 
 		c.sessionID = 0
 		c.passwd = emptyPassword
-		c.lastZxid = 0
+		c.lastZxid.Store(0)
 		c.state = StateExpired
 
 		if c.sessExpiredCallback != nil {
@@ -618,7 +619,7 @@ func (c *Client) reapplyAllWatches() {
 		subKeys := keys[i:end]
 
 		req := &setWatchesRequest{
-			RelativeZxid: c.lastZxid,
+			RelativeZxid: c.lastZxid.Load(),
 		}
 
 		for _, wpt := range subKeys {
@@ -846,7 +847,7 @@ func (c *Client) readSingleData(conn tcpConn) {
 	}
 
 	if res.Zxid > 0 {
-		c.lastZxid = res.Zxid
+		c.lastZxid.Store(res.Zxid)
 	}
 
 	if res.Xid == -1 {

@@ -126,7 +126,7 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 			Path: "/workers01",
 		}, createResp)
 
-		assert.Greater(t, c.lastZxid, int64(0))
+		assert.Greater(t, c.lastZxid.Load(), int64(0))
 	})
 
 	t.Run("get children", func(t *testing.T) {
