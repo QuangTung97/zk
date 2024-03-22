@@ -525,28 +525,51 @@ func (c *Client) reapplyAllWatches() {
 		return
 	}
 
-	req := &setWatchesRequest{
-		RelativeZxid: c.lastZxid,
-	}
-
-	// TODO Batching by Smaller Batches
+	keys := make([]watchPathType, 0, len(c.watchers))
 	for wpt := range c.watchers {
-		switch wpt.wType {
-		case watchTypeExist:
-			req.ExistWatches = append(req.ExistWatches, wpt.path)
-		case watchTypeChild:
-			req.ChildWatches = append(req.ChildWatches, wpt.path)
-		case watchTypeData:
-			req.DataWatches = append(req.DataWatches, wpt.path)
-		default:
-		}
+		keys = append(keys, wpt)
 	}
 
-	c.enqueueAlreadyLocked(
-		opSetWatches, req, &setWatchesResponse{},
-		func(resp any, zxid int64, err error) {},
-		clientWatchRequest{},
-	)
+	slices.SortFunc(keys, func(a, b watchPathType) int {
+		if a.path < b.path {
+			return -1
+		}
+		if a.path > b.path {
+			return 1
+		}
+		return int(a.wType - b.wType)
+	})
+
+	const batchSize = 64
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		subKeys := keys[i:end]
+
+		req := &setWatchesRequest{
+			RelativeZxid: c.lastZxid,
+		}
+
+		for _, wpt := range subKeys {
+			switch wpt.wType {
+			case watchTypeExist:
+				req.ExistWatches = append(req.ExistWatches, wpt.path)
+			case watchTypeChild:
+				req.ChildWatches = append(req.ChildWatches, wpt.path)
+			case watchTypeData:
+				req.DataWatches = append(req.DataWatches, wpt.path)
+			default:
+			}
+		}
+
+		c.enqueueAlreadyLocked(
+			opSetWatches, req, &setWatchesResponse{},
+			func(resp any, zxid int64, err error) {},
+			clientWatchRequest{},
+		)
+	}
 }
 
 func (c *Client) enqueueRequest(

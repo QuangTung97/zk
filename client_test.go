@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"testing"
@@ -365,6 +366,84 @@ func TestClient_Authenticate(t *testing.T) {
 			},
 			response: &setWatchesResponse{},
 		}, c.client.sendQueue[0])
+	})
+
+	t.Run("session reconnect reapply watches in batches", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		for i := 0; i < 65; i++ {
+			p := fmt.Sprintf("/workers%03d", i)
+			c.client.Get(
+				p, func(resp GetResponse, err error) {},
+				WithGetWatch(func(ev Event) {}),
+			)
+		}
+		c.client.Children("/",
+			func(resp ChildrenResponse, err error) {},
+			WithChildrenWatch(func(ev Event) {}),
+		)
+
+		// Do disconnect
+		c.client.disconnectAndClose(conn)
+
+		resp := connectResponse{
+			TimeOut:   12000,
+			SessionID: 3400,
+			Passwd:    []byte("new-pass"),
+		}
+		// write connectResponse to test connection
+		_, err := encodeObject[connectResponse](&resp, &c.codec, &c.conn.readBuf)
+		assert.Equal(t, nil, err)
+
+		err = c.client.authenticate(c.conn)
+		assert.Equal(t, nil, err)
+
+		// check state
+		assert.Equal(t, StateHasSession, c.client.state)
+		assert.Equal(t, 66, len(c.client.watchers))
+		assert.Equal(t, 2, len(c.client.sendQueue))
+		assert.Equal(t, 66, len(c.client.handleQueue))
+
+		var keys01 []string
+		for i := 0; i < 63; i++ {
+			p := fmt.Sprintf("/workers%03d", i)
+			keys01 = append(keys01, p)
+		}
+
+		// check set watches request
+		c.client.sendQueue[0].callback = nil
+		assert.Equal(t, clientRequest{
+			xid:    67,
+			opcode: 101, // opSetWatches
+			request: &setWatchesRequest{
+				RelativeZxid: 8020,
+				DataWatches:  keys01,
+				ChildWatches: []string{"/"},
+			},
+			response: &setWatchesResponse{},
+		}, c.client.sendQueue[0])
+
+		c.client.sendQueue[1].callback = nil
+		assert.Equal(t, clientRequest{
+			xid:    68,
+			opcode: opSetWatches,
+			request: &setWatchesRequest{
+				RelativeZxid: 8020,
+				DataWatches: []string{
+					"/workers063",
+					"/workers064",
+				},
+			},
+			response: &setWatchesResponse{},
+		}, c.client.sendQueue[1])
 	})
 }
 
