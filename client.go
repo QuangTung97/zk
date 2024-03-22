@@ -17,7 +17,7 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 		return nil, err
 	}
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 
 	go func() {
 		defer c.wg.Done()
@@ -32,6 +32,11 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 	go func() {
 		defer c.wg.Done()
 		c.runHandler()
+	}()
+
+	go func() {
+		defer c.wg.Done()
+		c.runPingLoop()
 	}()
 
 	return c, nil
@@ -89,6 +94,9 @@ type Client struct {
 	// =================================
 
 	wg sync.WaitGroup
+
+	pingSignalChan chan struct{}
+	pingCloseChan  chan struct{} // for closing ping loop
 }
 
 // Option ...
@@ -186,6 +194,9 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 		recvMap: map[int32]clientRequest{},
 
 		watchers: map[watchPathType][]func(ev clientWatchEvent){},
+
+		pingSignalChan: make(chan struct{}, 10),
+		pingCloseChan:  make(chan struct{}),
 	}
 
 	for _, option := range options {
@@ -389,6 +400,38 @@ func (c *Client) runHandler() {
 
 		for _, e := range events {
 			c.handleEventCallback(e)
+		}
+	}
+}
+
+func (c *Client) getPingDuration() time.Duration {
+	c.mut.Lock()
+	duration := c.pingInterval
+	c.mut.Unlock()
+	return duration
+}
+
+func (c *Client) runPingLoop() {
+	d := c.getPingDuration()
+	timer := time.NewTimer(d)
+
+	for {
+		select {
+		case <-timer.C:
+			timer.Reset(c.getPingDuration())
+			c.enqueueRequest(
+				opPing, &pingRequest{}, &pingResponse{},
+				func(resp any, zxid int64, err error) {},
+			)
+
+		case <-c.pingSignalChan:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(c.getPingDuration())
+
+		case <-c.pingCloseChan:
+			return
 		}
 	}
 }
@@ -901,8 +944,9 @@ func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res respon
 
 // Close ...
 func (c *Client) Close() {
-	c.mut.Lock()
+	close(c.pingCloseChan)
 
+	c.mut.Lock()
 	c.sendShutdown = true
 	c.enqueueAlreadyLocked(
 		opClose, &closeRequest{}, &closeResponse{},
