@@ -44,6 +44,8 @@ type connMock struct {
 
 	readDuration  []time.Duration
 	writeDuration []time.Duration
+
+	closeCalls int
 }
 
 func (c *connMock) Write(d []byte) (int, error) {
@@ -60,6 +62,7 @@ func (c *connMock) SetReadDeadline(d time.Duration) error {
 }
 
 func (c *connMock) Close() error {
+	c.closeCalls++
 	return nil
 }
 
@@ -295,6 +298,144 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, StateExpired, c.client.state)
 		assert.Equal(t, 0, len(c.client.watchers))
 		assert.Equal(t, 2, len(c.client.handleQueue))
+	})
+
+	t.Run("session reconnect reapply watches", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		c.client.Get(
+			"/workers01", func(resp GetResponse, err error) {},
+			WithGetWatch(func(ev Event) {}),
+		)
+		c.client.Get(
+			"/workers02", func(resp GetResponse, err error) {},
+			WithGetWatch(func(ev Event) {}),
+		)
+		assert.Equal(t, 2, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 0, len(c.client.recvMap))
+		assert.Equal(t, 0, len(c.client.handleQueue))
+
+		// Do disconnect
+		c.client.disconnectAndClose(conn)
+
+		// Check all queues after disconnect
+		assert.Equal(t, 0, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 0, len(c.client.recvMap))
+		queue := c.client.handleQueue
+		assert.Equal(t, 2, len(queue))
+		assert.Equal(t, int32(opGetData), queue[0].req.opcode)
+		assert.Equal(t, int32(opGetData), queue[1].req.opcode)
+
+		resp := connectResponse{
+			TimeOut:   12000,
+			SessionID: 3400,
+			Passwd:    []byte("new-pass"),
+		}
+		// write connectResponse to test connection
+		_, err := encodeObject[connectResponse](&resp, &c.codec, &c.conn.readBuf)
+		assert.Equal(t, nil, err)
+
+		err = c.client.authenticate(c.conn)
+		assert.Equal(t, nil, err)
+
+		// check state
+		assert.Equal(t, StateHasSession, c.client.state)
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 1, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.handleQueue))
+
+		// check set watches request
+		c.client.sendQueue[0].callback = nil
+		assert.Equal(t, clientRequest{
+			xid:    3,
+			opcode: 101, // opSetWatches
+			request: &setWatchesRequest{
+				RelativeZxid: 8020,
+				DataWatches:  []string{"/workers01", "/workers02"},
+			},
+			response: &setWatchesResponse{},
+		}, c.client.sendQueue[0])
+	})
+}
+
+func TestClient_DisconnectAndClose(t *testing.T) {
+	t.Run("check move from recv map to handle queue", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		var getErrors []error
+
+		c.client.Get(
+			"/workers01", func(resp GetResponse, err error) {
+				getErrors = append(getErrors, err)
+			},
+			WithGetWatch(func(ev Event) {}),
+		)
+		c.client.Get(
+			"/workers02", func(resp GetResponse, err error) {
+				getErrors = append(getErrors, err)
+			},
+			WithGetWatch(func(ev Event) {}),
+		)
+		assert.Equal(t, 2, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 0, len(c.client.recvMap))
+		assert.Equal(t, 0, len(c.client.handleQueue))
+
+		// do move from send queue to recv map
+		reqs, ok := c.client.getFromSendQueue()
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 2, len(reqs))
+
+		assert.Equal(t, 0, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 2, len(c.client.recvMap))
+		assert.Equal(t, 0, len(c.client.handleQueue))
+
+		// Do disconnect
+		c.client.disconnectAndClose(conn)
+
+		// Check all queues after disconnect
+		assert.Equal(t, 0, len(c.client.sendQueue))
+		assert.Equal(t, 2, len(c.client.watchers))
+		assert.Equal(t, 0, len(c.client.recvMap))
+		queue := c.client.handleQueue
+		assert.Equal(t, 2, len(queue))
+		assert.Equal(t, int32(opGetData), queue[0].req.opcode)
+		assert.Equal(t, int32(1), queue[0].req.xid)
+		assert.Equal(t, int32(opGetData), queue[1].req.opcode)
+		assert.Equal(t, int32(2), queue[1].req.xid)
+
+		assert.Equal(t, 1, conn.closeCalls)
+		assert.Nil(t, c.client.conn)
+		assert.Equal(t, StateDisconnected, c.client.state)
+		assert.Equal(t, 1, c.client.sendSema)
+
+		// DO call handle
+		assert.Equal(t, 0, len(getErrors))
+		c.client.handleEventCallback(queue[0])
+		c.client.handleEventCallback(queue[1])
+		assert.Equal(t, []error{
+			ErrConnectionClosed,
+			ErrConnectionClosed,
+		}, getErrors)
 	})
 }
 

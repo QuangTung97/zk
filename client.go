@@ -624,7 +624,7 @@ func (c *Client) updateStateAndFlushRequests(finalState State) bool {
 	c.state = finalState
 	c.conn = nil
 
-	events := make([]handleEvent, len(c.recvMap)+len(c.sendQueue))
+	events := make([]handleEvent, 0, len(c.recvMap)+len(c.sendQueue))
 
 	for _, req := range c.recvMap {
 		events = append(events, handleEvent{
@@ -645,7 +645,7 @@ func (c *Client) updateStateAndFlushRequests(finalState State) bool {
 	c.sendQueue = nil
 
 	slices.SortFunc(events, func(a, b handleEvent) int {
-		return int(b.req.xid - a.req.xid)
+		return int(a.req.xid - b.req.xid)
 	})
 
 	c.handleQueue = append(c.handleQueue, events...)
