@@ -1284,6 +1284,18 @@ func TestClientIntegration_Ping(t *testing.T) {
 	c := mustNewClient(t)
 
 	c.sendPingRequest()
+	time.Sleep(300 * time.Millisecond)
+
+	c.Close()
+
+	assert.Equal(t, 0, len(c.recvMap))
+}
+
+func TestClientIntegration_Ping_Multi_Times(t *testing.T) {
+	c := mustNewClient(t)
+
+	c.pingSignalChan <- struct{}{}
+	time.Sleep(300 * time.Millisecond)
 
 	c.Close()
 

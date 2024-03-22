@@ -299,7 +299,7 @@ func (c *Client) doConnect() (tcpConn, bool) {
 	c.state = StateConnecting
 	c.mut.Unlock()
 
-	netConn, err := net.Dial("tcp", c.servers[0])
+	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout*10)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
@@ -445,7 +445,7 @@ func (c *Client) runPingLoop() {
 func (c *Client) sendPingRequest() {
 	c.enqueueRequest(
 		opPing, &pingRequest{}, &pingResponse{},
-		func(resp any, zxid int64, err error) {},
+		nil,
 	)
 }
 
