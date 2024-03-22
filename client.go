@@ -299,6 +299,7 @@ func (c *Client) doConnect() (tcpConn, bool) {
 	c.state = StateConnecting
 	c.mut.Unlock()
 
+	// TODO Server Selector
 	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout*10)
 	if err != nil {
 		c.mut.Lock()
@@ -925,7 +926,7 @@ func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res respon
 		state: c.state,
 		zxid:  res.Zxid,
 		req: clientRequest{
-			xid:      -1,
+			xid:      watchEventXid,
 			opcode:   opWatcherEvent,
 			response: &ev,
 			callback: func(res any, zxid int64, err error) {
