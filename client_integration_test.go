@@ -1279,3 +1279,13 @@ func TestClientInternal_ACL(t *testing.T) {
 		assert.Equal(t, int32(0), resp.Stat.Aversion)
 	})
 }
+
+func TestClientIntegration_Ping(t *testing.T) {
+	c := mustNewClient(t)
+
+	c.sendPingRequest()
+
+	c.Close()
+
+	assert.Equal(t, 0, len(c.recvMap))
+}

@@ -221,6 +221,9 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 		if len(c.sendQueue) > 0 {
 			requests := c.sendQueue
 			for _, req := range requests {
+				if req.xid == pingRequestXid {
+					continue
+				}
 				c.recvMap[req.xid] = req
 			}
 			c.sendQueue = nil
@@ -425,10 +428,7 @@ func (c *Client) runPingLoop() {
 		select {
 		case <-timer.C:
 			timer.Reset(c.getPingDuration())
-			c.enqueueRequest(
-				opPing, &pingRequest{}, &pingResponse{},
-				func(resp any, zxid int64, err error) {},
-			)
+			c.sendPingRequest()
 
 		case <-c.pingSignalChan:
 			if !timer.Stop() {
@@ -440,6 +440,13 @@ func (c *Client) runPingLoop() {
 			return
 		}
 	}
+}
+
+func (c *Client) sendPingRequest() {
+	c.enqueueRequest(
+		opPing, &pingRequest{}, &pingResponse{},
+		func(resp any, zxid int64, err error) {},
+	)
 }
 
 func (c *Client) handleEventCallback(ev handleEvent) {
@@ -647,13 +654,22 @@ func (c *Client) enqueueRequestWithWatcher(
 	c.enqueueAlreadyLocked(opCode, request, response, callback, watch, true)
 }
 
+const watchEventXid int32 = -1
+const pingRequestXid int32 = -2
+
 func (c *Client) enqueueAlreadyLocked(
 	opCode int32, request any, response any,
 	callback func(resp any, zxid int64, err error),
 	watch clientWatchRequest, setAuth bool,
 ) {
+
+	xid := pingRequestXid
+	if opCode != opPing {
+		xid = c.nextXid()
+	}
+
 	req := clientRequest{
-		xid:      c.nextXid(),
+		xid:      xid,
 		opcode:   opCode,
 		request:  request,
 		response: response,
@@ -828,11 +844,11 @@ func (c *Client) readSingleData(conn tcpConn) {
 		c.lastZxid.Store(res.Zxid)
 	}
 
-	if res.Xid == -1 {
+	if res.Xid == watchEventXid {
 		c.handleWatchEvent(conn, buf[:], blen, res)
 		return
 	}
-	if res.Xid == -2 {
+	if res.Xid == pingRequestXid {
 		// Ping response. Ignore.
 		return
 	}

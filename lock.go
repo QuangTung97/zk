@@ -15,6 +15,7 @@ var (
 )
 
 // Lock is a mutual exclusion lock.
+// Deprecated
 type Lock struct {
 	c        *Conn
 	path     string

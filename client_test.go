@@ -759,3 +759,24 @@ func TestClient_RecvData(t *testing.T) {
 		assert.Equal(t, 0, len(c.client.watchers))
 	})
 }
+
+func TestClient_Ping(t *testing.T) {
+	c := newClientTest(t)
+
+	c.client.sessionID = 3400
+	c.client.passwd = []byte("some-pass")
+	c.client.lastZxid.Store(8020)
+	c.client.state = StateHasSession
+
+	c.client.sendPingRequest()
+
+	assert.Equal(t, 1, len(c.client.sendQueue))
+	assert.Equal(t, int32(-2), c.client.sendQueue[0].xid)
+	assert.Equal(t, 0, len(c.client.handleQueue))
+
+	c.client.getFromSendQueue()
+
+	assert.Equal(t, 0, len(c.client.sendQueue))
+	assert.Equal(t, 0, len(c.client.recvMap))
+	assert.Equal(t, 0, len(c.client.handleQueue))
+}
