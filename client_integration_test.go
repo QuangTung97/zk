@@ -752,6 +752,40 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 			ErrNodeExists,
 		}, errors)
 	})
+
+	t.Run("get data with watch node not exists, do not add watch", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		c.Get(
+			"/workers01", func(resp GetResponse, err error) {
+				steps = append(steps, "get-resp")
+				errors = append(errors, err)
+			}, WithGetWatch(func(ev Event) {
+				steps = append(steps, "get-event")
+			}),
+		)
+		c.Create("/workers01", nil, FlagEphemeral, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"get-resp",
+			"create-resp",
+		}, steps)
+		assert.Equal(t, []error{
+			ErrNoNode,
+			nil,
+		}, errors)
+		assert.Equal(t, 0, len(c.watchers))
+	})
 }
 
 func checkStat(t *testing.T, st *Stat) {

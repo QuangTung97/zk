@@ -661,6 +661,15 @@ const watchEventXid int32 = -1
 const pingRequestXid int32 = -2
 
 func (c *Client) addToWatcherMap(req clientRequest, err error) {
+	if err != nil {
+		if req.opcode != opExists {
+			return
+		}
+		// if cmd = exists and err = ErrNoNode => add watch
+		if !errors.Is(err, ErrNoNode) {
+			return
+		}
+	}
 	watch := req.watch
 	pathType := watch.pathType
 	if len(pathType.path) > 0 {
