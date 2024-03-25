@@ -9,6 +9,7 @@ import (
 )
 
 const client1 FakeClientID = "client01"
+const client2 FakeClientID = "client02"
 
 type fakeClientTest struct {
 	store *FakeZookeeper
@@ -69,6 +70,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 					Stat: zk.Stat{
 						Czxid: 101,
 					},
+					SessionID: 501,
 				},
 			},
 		}, c.store.Root)
@@ -122,6 +124,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 					Stat: zk.Stat{
 						Czxid: 101,
 					},
+					SessionID: 501,
 				},
 			},
 		}, c.store.Root)
@@ -620,6 +623,95 @@ func TestFakeClient_Create_With_Sequence(t *testing.T) {
 			"node01-0000000000",
 			"node01-0000000001",
 		},
+	}, childrenResp)
+}
+
+func TestFakeClient_Create_With_Ephemeral__Then_Session_Expired(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node01", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	c.store.SessionExpired(client1)
+
+	// Create Client 2
+	var childrenResp zk.ChildrenResponse
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Children("/", func(resp zk.ChildrenResponse, err error) {
+				childrenResp = resp
+			})
+		})
+	}))
+	c.store.Begin(client2)
+	c.store.ChildrenApply(client2)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client2))
+
+	assert.Equal(t, zk.ChildrenResponse{
+		Zxid:     102,
+		Children: nil,
+	}, childrenResp)
+}
+
+func TestFakeClient_Create_With_Ephemeral_On_Two_Clients(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var childrenResp zk.ChildrenResponse
+
+	NewFakeClientFactory(c.store, client1).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node01", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}))
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node02", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+			client.Children("/", func(resp zk.ChildrenResponse, err error) {
+				childrenResp = resp
+				errors = append(errors, err)
+			})
+		})
+	}))
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client2)
+
+	c.store.SessionExpired(client1)
+
+	c.store.ChildrenApply(client2)
+
+	assert.Equal(t, []error{nil, nil, nil}, errors)
+	assert.Equal(t, zk.ChildrenResponse{
+		Zxid:     103,
+		Children: []string{"node02"},
 	}, childrenResp)
 }
 

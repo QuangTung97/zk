@@ -9,6 +9,7 @@ import (
 )
 
 type FakeSessionState struct {
+	SessionID  int64
 	HasSession bool
 }
 
@@ -19,6 +20,8 @@ type ZNode struct {
 	Data     []byte
 	Flags    int32
 	Children []*ZNode
+
+	SessionID int64
 
 	NextSeq int64
 
@@ -36,6 +39,8 @@ type FakeZookeeper struct {
 
 	Root *ZNode // root znode
 
+	NextSessionID int64
+
 	Zxid int64
 }
 
@@ -47,6 +52,9 @@ func NewFakeZookeeper() *FakeZookeeper {
 		Pending:  map[FakeClientID][]any{},
 
 		Root: &ZNode{},
+
+		NextSessionID: 500,
+
 		Zxid: 100,
 	}
 }
@@ -81,6 +89,8 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 		panic("can not call Begin on client already had session")
 	}
 	state.HasSession = true
+	s.NextSessionID++
+	state.SessionID = s.NextSessionID
 	client := s.Clients[clientID]
 	callbacks := s.Sessions[clientID]
 	for _, cb := range callbacks {
@@ -108,13 +118,35 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 		panic("can not call SessionExpired on client already lost session")
 	}
 	state.HasSession = false
+	sessionID := state.SessionID
+	state.SessionID = 0
 
 	s.runAllCallbacksWithConnectionError(clientID)
+
+	s.Zxid++
+	s.deleteNodesRecursiveForSessionID(s.Root, sessionID)
 
 	callbacks := s.Sessions[clientID]
 	for _, cb := range callbacks {
 		cb.End()
 	}
+}
+
+func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, sessionID int64) {
+	var newChildren []*ZNode
+	for _, child := range parent.Children {
+		if child.Flags&zk.FlagEphemeral == 0 {
+			s.deleteNodesRecursiveForSessionID(child, sessionID)
+			newChildren = append(newChildren, child)
+			continue
+		}
+
+		if child.SessionID == sessionID {
+			continue
+		}
+		newChildren = append(newChildren, child)
+	}
+	parent.Children = newChildren
 }
 
 func computePathNodes(pathValue string) []string {
@@ -244,6 +276,7 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 		Stat: zk.Stat{
 			Czxid: s.Zxid,
 		},
+		SessionID: s.States[clientID].SessionID,
 	})
 
 	for _, w := range parent.ChildrenWatches {
