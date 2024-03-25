@@ -502,6 +502,38 @@ func TestFakeClient_Create_Then_Getw_Then_Set(t *testing.T) {
 	}, c.steps)
 }
 
+func TestFakeClient_Create_Then_Session_Expired(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers01", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+			client.Create("/workers02", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "create"}, c.store.PendingCalls(client1))
+
+	c.store.SessionExpired(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		zk.ErrConnectionClosed,
+		zk.ErrConnectionClosed,
+	}, errors)
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",

@@ -81,6 +81,23 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	}
 }
 
+func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
+	callbacks := s.Sessions[clientID]
+	actions := s.Pending[clientID]
+	s.Pending[clientID] = nil
+	for _, input := range actions {
+		switch inputVal := input.(type) {
+		case CreateInput:
+			inputVal.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
+		default:
+			panic("unknown input type")
+		}
+	}
+	for _, cb := range callbacks {
+		cb.End()
+	}
+}
+
 func computePathNodes(pathValue string) []string {
 	var nodes []string
 	for {
