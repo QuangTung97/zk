@@ -8,7 +8,7 @@ import (
 	"github.com/QuangTung97/zk"
 )
 
-const client1 = "client01"
+const client1 FakeClientID = "client01"
 
 func TestFakeClient(t *testing.T) {
 	t.Run("start with list children", func(t *testing.T) {
@@ -142,9 +142,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 
 		c.store.Begin(client1)
 
-		assert.Equal(t, []string{
-			"create",
-		}, c.store.PendingCalls(client1))
+		assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
 
 		// Create Success
 		c.store.CreateApply(client1)
@@ -164,6 +162,59 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 			Path: "/workers",
 		}, createResp)
 		assert.Equal(t, nil, createErr)
+
+		assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+	})
+
+	t.Run("success on second try", func(t *testing.T) {
+		c := newFakeClientTest()
+
+		var initFn func(sess *Session)
+		initFn = func(sess *Session) {
+			sess.Run(func(client Client) {
+				client.Create(
+					"/workers", []byte("data01"), zk.FlagEphemeral,
+					func(resp zk.CreateResponse, err error) {
+						c.addStep("create-resp")
+						if err != nil {
+							sess.AddRetry(initFn)
+						}
+					},
+				)
+			})
+		}
+
+		// init client 1
+		c1 := New(initFn)
+		f1 := NewFakeClientFactory(c.store, client1)
+		f1.Start(c1)
+
+		c.store.Begin(client1)
+		assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+		c.store.CreateConnError(client1)
+		assert.Equal(t, []string{"retry"}, c.store.PendingCalls(client1))
+
+		c.store.Retry(client1)
+		assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+		c.store.CreateApply(client1)
+		assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+		assert.Equal(t, &ZNode{
+			Children: []*ZNode{
+				{
+					Name:  "workers",
+					Data:  []byte("data01"),
+					Flags: zk.FlagEphemeral,
+				},
+			},
+		}, c.store.Root)
+
+		assert.Equal(t, []string{
+			"create-resp",
+			"create-resp",
+		}, c.steps)
 	})
 }
 

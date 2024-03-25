@@ -83,6 +83,7 @@ type ChildrenInput struct {
 
 const CallTypeChildren = "children"
 const CallTypeCreate = "create"
+const CallTypeRetry = "retry"
 
 func computePathNodes(pathValue string) []string {
 	var nodes []string
@@ -190,6 +191,29 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	delete(s.Pending[clientID], CallTypeCreate)
 }
 
+func (s *FakeZookeeper) CreateConnError(clientID FakeClientID) {
+	calls := s.CreateCalls(clientID)
+	delete(s.Pending[clientID], CallTypeCreate)
+	for _, c := range calls {
+		m := s.getPendingMap(clientID)
+		m[CallTypeRetry] = []any{}
+		c.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
+	}
+}
+
+func (s *FakeZookeeper) Retry(clientID FakeClientID) {
+	m := s.Pending[clientID]
+	_, ok := m[CallTypeRetry]
+	if !ok {
+		panic("No retry call currently pending")
+	}
+	delete(s.Pending[clientID], CallTypeRetry)
+	sessList := s.Sessions[clientID]
+	for _, sess := range sessList {
+		sess.Retry()
+	}
+}
+
 type fakeClient struct {
 	store    *FakeZookeeper
 	clientID FakeClientID
@@ -204,13 +228,17 @@ func (c *fakeClient) GetW(path string,
 ) {
 }
 
-func (c *fakeClient) getPendingMap() map[string][]any {
-	m, ok := c.store.Pending[c.clientID]
+func (s *FakeZookeeper) getPendingMap(clientID FakeClientID) map[string][]any {
+	m, ok := s.Pending[clientID]
 	if !ok {
 		m = map[string][]any{}
-		c.store.Pending[c.clientID] = m
+		s.Pending[clientID] = m
 	}
 	return m
+}
+
+func (c *fakeClient) getPendingMap() map[string][]any {
+	return c.store.getPendingMap(c.clientID)
 }
 
 func (c *fakeClient) Children(path string, callback func(resp zk.ChildrenResponse, err error)) {
