@@ -74,6 +74,11 @@ func (c *fakeClientFactory) Start(callbacks ...SessionCallback) {
 }
 
 func (s *FakeZookeeper) Begin(clientID FakeClientID) {
+	state := s.States[clientID]
+	if state.HasSession {
+		panic("can not call Begin on client already had session")
+	}
+	state.HasSession = true
 	client := s.Clients[clientID]
 	callbacks := s.Sessions[clientID]
 	for _, cb := range callbacks {
@@ -82,6 +87,12 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 }
 
 func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
+	state := s.States[clientID]
+	if !state.HasSession {
+		panic("can not call SessionExpired on client already lost session")
+	}
+	state.HasSession = false
+
 	callbacks := s.Sessions[clientID]
 	actions := s.Pending[clientID]
 	s.Pending[clientID] = nil

@@ -534,6 +534,52 @@ func TestFakeClient_Create_Then_Session_Expired(t *testing.T) {
 	}, errors)
 }
 
+func TestFakeClient_Begin_Multiple_Times_Panics(t *testing.T) {
+	c := newFakeClientTest()
+
+	initFn := func(sess *Session) {}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.PanicsWithValue(t, "can not call Begin on client already had session", func() {
+		c.store.Begin(client1)
+	})
+}
+
+func TestFakeClient_Create_Then_Session_Expired__Then_New_Session_Established(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers01", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+	c.store.SessionExpired(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+
+	assert.Equal(t, []error{
+		zk.ErrConnectionClosed,
+		nil,
+	}, errors)
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",
