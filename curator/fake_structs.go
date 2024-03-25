@@ -7,6 +7,8 @@ import (
 type ChildrenInput struct {
 	Path     string
 	Callback func(resp zk.ChildrenResponse, err error)
+	Watch    bool
+	Watcher  func(ev zk.Event)
 }
 
 type CreateInput struct {

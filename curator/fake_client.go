@@ -19,6 +19,8 @@ type ZNode struct {
 	Data     []byte
 	Flags    int32
 	Children []*ZNode
+
+	ChildrenWatches []func(ev zk.Event)
 }
 
 type FakeZookeeper struct {
@@ -90,15 +92,16 @@ func computePathNodes(pathValue string) []string {
 	return nodes
 }
 
-func (s *FakeZookeeper) findParentNode(pathValue string) *ZNode {
+func (s *FakeZookeeper) findNode(pathValue string) *ZNode {
 	nodes := computePathNodes(pathValue)
 	current := s.Root
-	for i := 1; i < len(nodes)-1; i++ {
+Outer:
+	for i := 1; i < len(nodes); i++ {
 		n := nodes[i]
 		for _, child := range current.Children {
 			if child.Name == n {
 				current = child
-				continue
+				continue Outer
 			}
 		}
 		return nil
@@ -141,9 +144,13 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 	values := make([]string, 0)
 	for _, input := range s.Pending[clientID] {
-		switch input.(type) {
+		switch inputVal := input.(type) {
 		case ChildrenInput:
-			values = append(values, "children")
+			if inputVal.Watch {
+				values = append(values, "children-w")
+			} else {
+				values = append(values, "children")
+			}
 		case CreateInput:
 			values = append(values, "create")
 		case RetryInput:
@@ -167,31 +174,38 @@ func (s *FakeZookeeper) popFirst(clientID FakeClientID) {
 
 func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	input := s.CreateCall(clientID)
-	parent := s.findParentNode(input.Path)
+	parent := s.findNode(stdpath.Dir(input.Path))
+	if parent == nil {
+		input.Callback(zk.CreateResponse{}, zk.ErrNoNode)
+		return
+	}
+
+	nodeName := stdpath.Base(input.Path)
+	for _, child := range parent.Children {
+		if child.Name == nodeName {
+			input.Callback(zk.CreateResponse{}, zk.ErrNodeExists)
+			return
+		}
+	}
+
 	parent.Children = append(parent.Children, &ZNode{
-		Name:  stdpath.Base(input.Path),
+		Name:  nodeName,
 		Data:  input.Data,
 		Flags: input.Flags,
 	})
 	s.Zxid++
+
+	for _, w := range parent.ChildrenWatches {
+		w(zk.Event{
+			Type:  zk.EventNodeChildrenChanged,
+			State: 3,
+			Path:  stdpath.Dir(input.Path),
+		})
+	}
+
 	input.Callback(zk.CreateResponse{
 		Zxid: s.Zxid,
 		Path: input.Path,
-	}, nil)
-}
-
-func (s *FakeZookeeper) ChildrenApply(clientID FakeClientID) {
-	input := getActionWithType[ChildrenInput](s, clientID, "Children")
-
-	parent := s.findParentNode(input.Path)
-	var children []string
-	for _, child := range parent.Children {
-		children = append(children, child.Name)
-	}
-
-	input.Callback(zk.ChildrenResponse{
-		Zxid:     s.Zxid,
-		Children: children,
 	}, nil)
 }
 
@@ -199,6 +213,28 @@ func (s *FakeZookeeper) CreateConnError(clientID FakeClientID) {
 	input := getActionWithType[CreateInput](s, clientID, "Create")
 	input.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
 	s.appendActions(clientID, RetryInput{})
+}
+
+func (s *FakeZookeeper) ChildrenApply(clientID FakeClientID) {
+	input := getActionWithType[ChildrenInput](s, clientID, "Children")
+
+	parent := s.findNode(input.Path)
+	if parent == nil {
+		input.Callback(zk.ChildrenResponse{}, zk.ErrNoNode)
+		return
+	}
+	var children []string
+	for _, child := range parent.Children {
+		children = append(children, child.Name)
+	}
+	if input.Watch {
+		parent.ChildrenWatches = append(parent.ChildrenWatches, input.Watcher)
+	}
+
+	input.Callback(zk.ChildrenResponse{
+		Zxid:     s.Zxid,
+		Children: children,
+	}, nil)
 }
 
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
@@ -240,6 +276,13 @@ func (c *fakeClient) ChildrenW(path string,
 	callback func(resp zk.ChildrenResponse, err error),
 	watcher func(ev zk.Event),
 ) {
+	input := ChildrenInput{
+		Path:     path,
+		Callback: callback,
+		Watch:    true,
+		Watcher:  watcher,
+	}
+	c.store.appendActions(c.clientID, input)
 }
 
 func (c *fakeClient) Create(

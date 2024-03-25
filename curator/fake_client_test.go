@@ -27,6 +27,12 @@ func newFakeClientTest() *fakeClientTest {
 	}
 }
 
+func (c *fakeClientTest) startCuratorClient1(initFn func(sess *Session)) {
+	c1 := New(initFn)
+	f1 := NewFakeClientFactory(c.store, client1)
+	f1.Start(c1)
+}
+
 func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 	t.Run("success on first try", func(t *testing.T) {
 		c := newFakeClientTest()
@@ -34,8 +40,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 		var createResp zk.CreateResponse
 		var createErr error
 
-		// init client 1
-		c1 := New(func(sess *Session) {
+		initFn := func(sess *Session) {
 			sess.Run(func(client Client) {
 				client.Create(
 					"/workers", []byte("data01"), zk.FlagEphemeral,
@@ -45,9 +50,8 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 					},
 				)
 			})
-		})
-		f1 := NewFakeClientFactory(c.store, client1)
-		f1.Start(c1)
+		}
+		c.startCuratorClient1(initFn)
 
 		c.store.Begin(client1)
 
@@ -92,11 +96,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 				)
 			})
 		}
-
-		// init client 1
-		c1 := New(initFn)
-		f1 := NewFakeClientFactory(c.store, client1)
-		f1.Start(c1)
+		c.startCuratorClient1(initFn)
 
 		c.store.Begin(client1)
 		assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
@@ -147,11 +147,7 @@ func TestFakeClient_CreateThenListChildren(t *testing.T) {
 				})
 			})
 		}
-
-		// init client 1
-		c1 := New(initFn)
-		f1 := NewFakeClientFactory(c.store, client1)
-		f1.Start(c1)
+		c.startCuratorClient1(initFn)
 
 		c.store.Begin(client1)
 		assert.Equal(t, []string{"create", "create", "children"}, c.store.PendingCalls(client1))
@@ -172,6 +168,127 @@ func TestFakeClient_CreateThenListChildren(t *testing.T) {
 			},
 		}, childrenResp)
 	})
+}
+
+func TestFakeClient_ListChildren_Not_Found_Parent(t *testing.T) {
+	c := newFakeClientTest()
+
+	var childrenErr error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Children("/workers", func(resp zk.ChildrenResponse, err error) {
+				childrenErr = err
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"children"}, c.store.PendingCalls(client1))
+
+	c.store.ChildrenApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, zk.ErrNoNode, childrenErr)
+}
+
+func TestFakeClient_Create_Parent_Not_Found(t *testing.T) {
+	c := newFakeClientTest()
+
+	var createErr error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers/node01", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					createErr = err
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, zk.ErrNoNode, createErr)
+}
+
+func TestFakeClient_Create_Duplicated(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+			client.Create("/workers", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "create"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+
+	c.store.CreateApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		zk.ErrNodeExists,
+	}, errors)
+}
+
+func TestFakeClient_ListChildren_With_Watch(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var watchEvent zk.Event
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				errors = append(errors, err)
+			}, func(ev zk.Event) {
+				watchEvent = ev
+			})
+
+			client.Create("/workers", nil, zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"children-w", "create"}, c.store.PendingCalls(client1))
+
+	c.store.ChildrenApply(client1)
+	c.store.CreateApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+	}, errors)
+
+	assert.Equal(t, zk.Event{
+		Type:  zk.EventNodeChildrenChanged,
+		State: 3,
+		Path:  "/",
+	}, watchEvent)
 }
 
 func TestComputePathNodes(t *testing.T) {
