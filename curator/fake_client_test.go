@@ -580,6 +580,49 @@ func TestFakeClient_Create_Then_Session_Expired__Then_New_Session_Established(t 
 	}, errors)
 }
 
+func TestFakeClient_Create_With_Sequence(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var childrenResp zk.ChildrenResponse
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node01-", []byte("data01"), zk.FlagEphemeral|zk.FlagSequence,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+			client.Create("/node01-", []byte("data02"), zk.FlagEphemeral|zk.FlagSequence,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+			client.Children("/", func(resp zk.ChildrenResponse, err error) {
+				childrenResp = resp
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "create", "children"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+	c.store.ChildrenApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{nil, nil, nil}, errors)
+	assert.Equal(t, zk.ChildrenResponse{
+		Zxid: 102,
+		Children: []string{
+			"node01-0000000000",
+			"node01-0000000001",
+		},
+	}, childrenResp)
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",

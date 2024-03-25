@@ -20,6 +20,8 @@ type ZNode struct {
 	Flags    int32
 	Children []*ZNode
 
+	NextSeq int64
+
 	Stat zk.Stat
 
 	ChildrenWatches []func(ev zk.Event)
@@ -222,10 +224,15 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	}
 
 	nodeName := stdpath.Base(input.Path)
-	for _, child := range parent.Children {
-		if child.Name == nodeName {
-			input.Callback(zk.CreateResponse{}, zk.ErrNodeExists)
-			return
+	if input.Flags&zk.FlagSequence != 0 {
+		nodeName = nodeName + fmt.Sprintf("%010d", parent.NextSeq)
+		parent.NextSeq++
+	} else {
+		for _, child := range parent.Children {
+			if child.Name == nodeName {
+				input.Callback(zk.CreateResponse{}, zk.ErrNodeExists)
+				return
+			}
 		}
 	}
 
