@@ -83,4 +83,100 @@ func TestFakeClient(t *testing.T) {
 		assert.Equal(t, 2, len(calls))
 		assert.Equal(t, "/lock2", calls[1].Path)
 	})
+
+	t.Run("panics when not calling children", func(t *testing.T) {
+		store := NewFakeZookeeper()
+
+		// init client 1
+		c1 := New(func(sess *Session) {})
+		f1 := NewFakeClientFactory(store, client1)
+		f1.Start(c1)
+
+		// begin zookeeper client
+		store.Begin(client1)
+
+		assert.PanicsWithValue(t, "No children call currently pending", func() {
+			store.ChildrenCall(client1)
+		})
+	})
+}
+
+type fakeClientTest struct {
+	store *FakeZookeeper
+	steps []string
+}
+
+func (c *fakeClientTest) addStep(s string) {
+	c.steps = append(c.steps, s)
+}
+
+func newFakeClientTest() *fakeClientTest {
+	store := NewFakeZookeeper()
+	return &fakeClientTest{
+		store: store,
+		steps: []string{},
+	}
+}
+
+func TestFakeClient_CreateUntilSuccess(t *testing.T) {
+	t.Run("success on first try", func(t *testing.T) {
+		c := newFakeClientTest()
+
+		var createResp zk.CreateResponse
+		var createErr error
+
+		// init client 1
+		c1 := New(func(sess *Session) {
+			sess.Run(func(client Client) {
+				client.Create(
+					"/workers", []byte("data01"), zk.FlagEphemeral,
+					func(resp zk.CreateResponse, err error) {
+						createResp = resp
+						createErr = err
+					},
+				)
+			})
+		})
+		f1 := NewFakeClientFactory(c.store, client1)
+		f1.Start(c1)
+
+		c.store.Begin(client1)
+
+		assert.Equal(t, []string{
+			"create",
+		}, c.store.PendingCalls(client1))
+
+		// Create Success
+		c.store.CreateApply(client1)
+
+		assert.Equal(t, &ZNode{
+			Children: []*ZNode{
+				{
+					Name:  "workers",
+					Data:  []byte("data01"),
+					Flags: zk.FlagEphemeral,
+				},
+			},
+		}, c.store.Root)
+
+		assert.Equal(t, zk.CreateResponse{
+			Zxid: 101,
+			Path: "/workers",
+		}, createResp)
+		assert.Equal(t, nil, createErr)
+	})
+}
+
+func TestComputePathNodes(t *testing.T) {
+	assert.Equal(t, []string{
+		"/", "workers",
+	}, computePathNodes("/workers"))
+
+	assert.Equal(t, []string{
+		"/",
+	}, computePathNodes("/"))
+
+	assert.Equal(t, []string{
+		"/", "data", "tmp01",
+	}, computePathNodes("/data/tmp01"))
 }
