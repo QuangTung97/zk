@@ -104,7 +104,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 		c.store.Begin(client1)
 		assert.Equal(t, []string{"create"}, c.store.PendingCalls(client1))
 
-		c.store.CreateConnError(client1)
+		c.store.ConnError(client1)
 		assert.Equal(t, []string{"retry"}, c.store.PendingCalls(client1))
 
 		c.store.Retry(client1)

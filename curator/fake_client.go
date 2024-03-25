@@ -86,14 +86,7 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	}
 }
 
-func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
-	state := s.States[clientID]
-	if !state.HasSession {
-		panic("can not call SessionExpired on client already lost session")
-	}
-	state.HasSession = false
-
-	callbacks := s.Sessions[clientID]
+func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID) {
 	actions := s.Pending[clientID]
 	s.Pending[clientID] = nil
 	for _, input := range actions {
@@ -104,6 +97,19 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 			panic("unknown input type")
 		}
 	}
+
+}
+
+func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
+	state := s.States[clientID]
+	if !state.HasSession {
+		panic("can not call SessionExpired on client already lost session")
+	}
+	state.HasSession = false
+
+	s.runAllCallbacksWithConnectionError(clientID)
+
+	callbacks := s.Sessions[clientID]
 	for _, cb := range callbacks {
 		cb.End()
 	}
@@ -248,9 +254,8 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	}, nil)
 }
 
-func (s *FakeZookeeper) CreateConnError(clientID FakeClientID) {
-	input := getActionWithType[CreateInput](s, clientID, "Create")
-	input.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
+func (s *FakeZookeeper) ConnError(clientID FakeClientID) {
+	s.runAllCallbacksWithConnectionError(clientID)
 	s.appendActions(clientID, RetryInput{})
 }
 
