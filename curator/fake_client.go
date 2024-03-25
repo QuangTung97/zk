@@ -68,13 +68,25 @@ type ChildrenInput struct {
 
 const CallTypeChildren = "children"
 
-func (s *FakeZookeeper) ChildrenCall(clientID FakeClientID) ChildrenInput {
+func (s *FakeZookeeper) ChildrenCalls(clientID FakeClientID) []ChildrenInput {
 	m := s.Pending[clientID]
 	inputs := m[CallTypeChildren]
 	if len(inputs) == 0 {
-		// panic("No children call currently pending")
+		panic("No children call currently pending")
 	}
-	return inputs[0].(ChildrenInput)
+	var res []ChildrenInput
+	for _, input := range inputs {
+		res = append(res, input.(ChildrenInput))
+	}
+	return res
+}
+
+func (s *FakeZookeeper) ChildrenCall(clientID FakeClientID) ChildrenInput {
+	inputs := s.ChildrenCalls(clientID)
+	if len(inputs) > 1 {
+		panic("ChildrenCall has more than one call")
+	}
+	return inputs[0]
 }
 
 func (s *FakeZookeeper) PrintPendingCalls() {
@@ -82,14 +94,14 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 		if len(m) == 0 {
 			continue
 		}
-		fmt.Println("------------------------------------")
+		fmt.Println("------------------------------------------------")
 		fmt.Println("CLIENT:", client)
 		for p, inputs := range m {
 			fmt.Println("  ", p, inputs)
 		}
 	}
 	if len(s.Pending) > 0 {
-		fmt.Println("------------------------------------")
+		fmt.Println("------------------------------------------------")
 	}
 }
 
