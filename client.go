@@ -714,9 +714,6 @@ func (c *Client) enqueueAlreadyLocked(
 	}
 
 	err := ErrConnectionClosed
-	if c.state == StateExpired {
-		err = ErrSessionExpired
-	}
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
 		state: c.state,

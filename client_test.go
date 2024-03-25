@@ -868,5 +868,5 @@ func TestClient_Get_After_Expired(t *testing.T) {
 	assert.Equal(t, 1, len(queue))
 	c.client.handleEventCallback(queue[0])
 
-	assert.Equal(t, ErrSessionExpired, getErr)
+	assert.Equal(t, ErrConnectionClosed, getErr)
 }

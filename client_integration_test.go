@@ -1094,7 +1094,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			}),
 		)
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		_ = c.conn.Close()
 		time.Sleep(500 * time.Millisecond)
 
@@ -1151,7 +1151,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			}),
 		)
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		_ = c.conn.Close()
 		time.Sleep(500 * time.Millisecond)
 
