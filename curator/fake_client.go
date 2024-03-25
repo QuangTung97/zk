@@ -25,7 +25,7 @@ type FakeZookeeper struct {
 	States   map[FakeClientID]*FakeSessionState
 	Sessions map[FakeClientID][]SessionCallback
 	Clients  map[FakeClientID]Client
-	Pending  map[FakeClientID]map[string][]any
+	Pending  map[FakeClientID][]any
 
 	Root *ZNode // root znode
 
@@ -37,7 +37,7 @@ func NewFakeZookeeper() *FakeZookeeper {
 		States:   map[FakeClientID]*FakeSessionState{},
 		Sessions: map[FakeClientID][]SessionCallback{},
 		Clients:  map[FakeClientID]Client{},
-		Pending:  map[FakeClientID]map[string][]any{},
+		Pending:  map[FakeClientID][]any{},
 
 		Root: &ZNode{},
 		Zxid: 100,
@@ -114,25 +114,20 @@ func (s *FakeZookeeper) findParentNode(pathValue string) *ZNode {
 	return current
 }
 
-func (s *FakeZookeeper) ChildrenCalls(clientID FakeClientID) []ChildrenInput {
-	m := s.Pending[clientID]
-	inputs := m[CallTypeChildren]
-	if len(inputs) == 0 {
-		panic("No children call currently pending")
+func getActionWithType[T any](s *FakeZookeeper, clientID FakeClientID, methodName string) T {
+	actions := s.Pending[clientID]
+	msg := fmt.Sprintf("No %s call currently pending", methodName)
+	if len(actions) == 0 {
+		panic(msg)
 	}
-	var res []ChildrenInput
-	for _, input := range inputs {
-		res = append(res, input.(ChildrenInput))
+	val, ok := actions[0].(T)
+	if !ok {
+		panic(msg)
 	}
-	return res
-}
 
-func (s *FakeZookeeper) ChildrenCall(clientID FakeClientID) ChildrenInput {
-	inputs := s.ChildrenCalls(clientID)
-	if len(inputs) > 1 {
-		panic("ChildrenCall has more than one call")
-	}
-	return inputs[0]
+	s.popFirst(clientID)
+
+	return val
 }
 
 func (s *FakeZookeeper) PrintPendingCalls() {
@@ -142,8 +137,8 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 		}
 		fmt.Println("------------------------------------------------")
 		fmt.Println("CLIENT:", client)
-		for p, inputs := range m {
-			fmt.Println("  ", p, inputs)
+		for _, inputs := range m {
+			fmt.Println("  ", inputs)
 		}
 	}
 	if len(s.Pending) > 0 {
@@ -153,61 +148,59 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 
 func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 	values := make([]string, 0)
-	for p := range s.Pending[clientID] {
-		values = append(values, p)
+	for _, input := range s.Pending[clientID] {
+		switch input.(type) {
+		case ChildrenInput:
+			values = append(values, "children")
+		case CreateInput:
+			values = append(values, "create")
+		case RetryInput:
+			values = append(values, "retry")
+		default:
+			panic("Unknown input type")
+		}
 	}
-	slices.Sort(values)
 	return values
 }
 
-func (s *FakeZookeeper) CreateCalls(clientID FakeClientID) []CreateInput {
-	m := s.Pending[clientID]
-	inputs := m[CallTypeCreate]
-	if len(inputs) == 0 {
-		panic("No create call currently pending")
-	}
-	var res []CreateInput
-	for _, input := range inputs {
-		res = append(res, input.(CreateInput))
-	}
-	return res
+func (s *FakeZookeeper) CreateCall(clientID FakeClientID) CreateInput {
+	return getActionWithType[CreateInput](s, clientID, "Create")
+}
+
+func (s *FakeZookeeper) popFirst(clientID FakeClientID) {
+	actions := s.Pending[clientID]
+	actions = slices.Clone(actions[1:])
+	s.Pending[clientID] = actions
 }
 
 func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
-	calls := s.CreateCalls(clientID)
-	for _, c := range calls {
-		parent := s.findParentNode(c.Path)
-		parent.Children = append(parent.Children, &ZNode{
-			Name:  stdpath.Base(c.Path),
-			Data:  c.Data,
-			Flags: c.Flags,
-		})
-		s.Zxid++
-		c.Callback(zk.CreateResponse{
-			Zxid: s.Zxid,
-			Path: c.Path,
-		}, nil)
-	}
-	delete(s.Pending[clientID], CallTypeCreate)
+	input := s.CreateCall(clientID)
+	parent := s.findParentNode(input.Path)
+	parent.Children = append(parent.Children, &ZNode{
+		Name:  stdpath.Base(input.Path),
+		Data:  input.Data,
+		Flags: input.Flags,
+	})
+	s.Zxid++
+	input.Callback(zk.CreateResponse{
+		Zxid: s.Zxid,
+		Path: input.Path,
+	}, nil)
+
+}
+
+type RetryInput struct {
 }
 
 func (s *FakeZookeeper) CreateConnError(clientID FakeClientID) {
-	calls := s.CreateCalls(clientID)
-	delete(s.Pending[clientID], CallTypeCreate)
-	for _, c := range calls {
-		m := s.getPendingMap(clientID)
-		m[CallTypeRetry] = []any{}
-		c.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
-	}
+	input := getActionWithType[CreateInput](s, clientID, "Create")
+	input.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
+	s.appendActions(clientID, RetryInput{})
 }
 
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
-	m := s.Pending[clientID]
-	_, ok := m[CallTypeRetry]
-	if !ok {
-		panic("No retry call currently pending")
-	}
-	delete(s.Pending[clientID], CallTypeRetry)
+	getActionWithType[RetryInput](s, clientID, "Retry")
+
 	sessList := s.Sessions[clientID]
 	for _, sess := range sessList {
 		sess.Retry()
@@ -228,25 +221,16 @@ func (c *fakeClient) GetW(path string,
 ) {
 }
 
-func (s *FakeZookeeper) getPendingMap(clientID FakeClientID) map[string][]any {
-	m, ok := s.Pending[clientID]
-	if !ok {
-		m = map[string][]any{}
-		s.Pending[clientID] = m
-	}
-	return m
-}
-
-func (c *fakeClient) getPendingMap() map[string][]any {
-	return c.store.getPendingMap(c.clientID)
+func (s *FakeZookeeper) appendActions(clientID FakeClientID, action any) {
+	s.Pending[clientID] = append(s.Pending[clientID], action)
 }
 
 func (c *fakeClient) Children(path string, callback func(resp zk.ChildrenResponse, err error)) {
-	m := c.getPendingMap()
-	m[CallTypeChildren] = append(m[CallTypeChildren], ChildrenInput{
+	input := ChildrenInput{
 		Path:     path,
 		Callback: callback,
-	})
+	}
+	c.store.appendActions(c.clientID, input)
 }
 
 func (c *fakeClient) ChildrenW(path string,
@@ -266,11 +250,11 @@ func (c *fakeClient) Create(
 	path string, data []byte, flags int32,
 	callback func(resp zk.CreateResponse, err error),
 ) {
-	m := c.getPendingMap()
-	m[CallTypeCreate] = append(m[CallTypeCreate], CreateInput{
+	input := CreateInput{
 		Path:     path,
 		Data:     data,
 		Flags:    flags,
 		Callback: callback,
-	})
+	}
+	c.store.appendActions(c.clientID, input)
 }
