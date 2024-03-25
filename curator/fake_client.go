@@ -20,6 +20,8 @@ type ZNode struct {
 	Flags    int32
 	Children []*ZNode
 
+	Stat zk.Stat
+
 	ChildrenWatches []func(ev zk.Event)
 }
 
@@ -151,8 +153,12 @@ func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 			} else {
 				values = append(values, "children")
 			}
+		case GetInput:
+			values = append(values, "get-w")
 		case CreateInput:
 			values = append(values, "create")
+		case SetInput:
+			values = append(values, "set")
 		case RetryInput:
 			values = append(values, "retry")
 		default:
@@ -188,12 +194,15 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 		}
 	}
 
+	s.Zxid++
 	parent.Children = append(parent.Children, &ZNode{
 		Name:  nodeName,
 		Data:  input.Data,
 		Flags: input.Flags,
+		Stat: zk.Stat{
+			Czxid: s.Zxid,
+		},
 	})
-	s.Zxid++
 
 	for _, w := range parent.ChildrenWatches {
 		w(zk.Event{
@@ -237,6 +246,47 @@ func (s *FakeZookeeper) ChildrenApply(clientID FakeClientID) {
 	}, nil)
 }
 
+func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
+	input := getActionWithType[GetInput](s, clientID, "Get")
+
+	node := s.findNode(input.Path)
+	if node == nil {
+		input.Callback(zk.GetResponse{}, zk.ErrNoNode)
+		return
+	}
+
+	input.Callback(zk.GetResponse{
+		Zxid: s.Zxid,
+		Data: node.Data,
+	}, nil)
+}
+
+func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
+	input := getActionWithType[SetInput](s, clientID, "Set")
+
+	node := s.findNode(input.Path)
+	if node == nil {
+		input.Callback(zk.SetResponse{}, zk.ErrNoNode)
+		return
+	}
+
+	if node.Stat.Version != input.Version {
+		input.Callback(zk.SetResponse{}, zk.ErrBadVersion)
+		return
+	}
+
+	s.Zxid++
+
+	node.Data = input.Data
+	node.Stat.Version++
+	node.Stat.Mzxid = s.Zxid
+
+	input.Callback(zk.SetResponse{
+		Zxid: s.Zxid,
+		Stat: node.Stat,
+	}, nil)
+}
+
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 
@@ -252,12 +302,20 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) Get(path string, callback func(resp zk.GetResponse, err error)) {
+	panic("TODO")
 }
 
 func (c *fakeClient) GetW(path string,
 	callback func(resp zk.GetResponse, err error),
 	watcher func(ev zk.Event),
 ) {
+	input := GetInput{
+		Path:     path,
+		Callback: callback,
+		Watch:    true,
+		Watcher:  watcher,
+	}
+	c.store.appendActions(c.clientID, input)
 }
 
 func (s *FakeZookeeper) appendActions(clientID FakeClientID, action any) {
@@ -293,6 +351,19 @@ func (c *fakeClient) Create(
 		Path:     path,
 		Data:     data,
 		Flags:    flags,
+		Callback: callback,
+	}
+	c.store.appendActions(c.clientID, input)
+}
+
+func (c *fakeClient) Set(
+	path string, data []byte, version int32,
+	callback func(resp zk.SetResponse, err error),
+) {
+	input := SetInput{
+		Path:     path,
+		Data:     data,
+		Version:  version,
 		Callback: callback,
 	}
 	c.store.appendActions(c.clientID, input)

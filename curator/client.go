@@ -33,6 +33,10 @@ type Client interface {
 		path string, data []byte, flags int32,
 		callback func(resp zk.CreateResponse, err error),
 	)
+	Set(
+		path string, data []byte, version int32,
+		callback func(resp zk.SetResponse, err error),
+	)
 }
 
 type clientImpl struct {
@@ -122,4 +126,11 @@ func (c *clientImpl) Create(
 	callback func(resp zk.CreateResponse, err error),
 ) {
 	c.zkClient.Create(path, data, flags, c.acl, callback)
+}
+
+func (c *clientImpl) Set(
+	path string, data []byte, version int32,
+	callback func(resp zk.SetResponse, err error),
+) {
+	c.zkClient.Set(path, data, version, callback)
 }

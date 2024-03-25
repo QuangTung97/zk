@@ -18,5 +18,19 @@ type CreateInput struct {
 	Callback func(resp zk.CreateResponse, err error)
 }
 
+type GetInput struct {
+	Path     string
+	Callback func(resp zk.GetResponse, err error)
+	Watch    bool
+	Watcher  func(ev zk.Event)
+}
+
+type SetInput struct {
+	Path     string
+	Data     []byte
+	Version  int32
+	Callback func(resp zk.SetResponse, err error)
+}
+
 type RetryInput struct {
 }
