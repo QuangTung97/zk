@@ -23,6 +23,7 @@ type ZNode struct {
 	Stat zk.Stat
 
 	ChildrenWatches []func(ev zk.Event)
+	DataWatches     []func(ev zk.Event)
 }
 
 type FakeZookeeper struct {
@@ -211,6 +212,7 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 			Path:  stdpath.Dir(input.Path),
 		})
 	}
+	parent.ChildrenWatches = nil
 
 	input.Callback(zk.CreateResponse{
 		Zxid: s.Zxid,
@@ -255,6 +257,10 @@ func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
 		return
 	}
 
+	if input.Watch {
+		node.DataWatches = append(node.DataWatches, input.Watcher)
+	}
+
 	input.Callback(zk.GetResponse{
 		Zxid: s.Zxid,
 		Data: node.Data,
@@ -280,6 +286,15 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 	node.Data = input.Data
 	node.Stat.Version++
 	node.Stat.Mzxid = s.Zxid
+
+	for _, w := range node.DataWatches {
+		w(zk.Event{
+			Type:  zk.EventNodeDataChanged,
+			State: 3,
+			Path:  input.Path,
+		})
+	}
+	node.DataWatches = nil
 
 	input.Callback(zk.SetResponse{
 		Zxid: s.Zxid,

@@ -445,6 +445,63 @@ func TestFakeClient_Create_Then_Set(t *testing.T) {
 	}, respList)
 }
 
+func TestFakeClient_Create_Then_Getw_Then_Set(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var getResp zk.GetResponse
+	var watchEvent zk.Event
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+				},
+			)
+
+			client.GetW("/workers", func(resp zk.GetResponse, err error) {
+				getResp = resp
+				errors = append(errors, err)
+				c.addStep("get-resp")
+			}, func(ev zk.Event) {
+				watchEvent = ev
+				c.addStep("get-watch")
+			})
+
+			client.Set("/workers", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
+				c.addStep("set-resp")
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "get-w", "set"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.GetApply(client1)
+	c.store.SetApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+	}, errors)
+	assert.Equal(t, zk.GetResponse{
+		Zxid: 101,
+		Data: []byte("data01"),
+	}, getResp)
+	assert.Equal(t, zk.Event{
+		Type:  zk.EventNodeDataChanged,
+		State: 3,
+		Path:  "/workers",
+	}, watchEvent)
+
+	assert.Equal(t, []string{
+		"get-resp",
+		"get-watch",
+		"set-resp",
+	}, c.steps)
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",
