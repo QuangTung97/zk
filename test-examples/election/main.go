@@ -96,6 +96,9 @@ func (e *Election) waitForPrevNode(sess *curator.Session, prevZnode string) {
 				e.initFunc(sess)
 				return
 			}
+			if err != nil {
+				panic(err)
+			}
 		}, zk.WithGetWatch(func(ev zk.Event) {
 			if ev.Type == zk.EventNodeDeleted {
 				e.initFunc(sess)

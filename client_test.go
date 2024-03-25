@@ -113,6 +113,12 @@ func (c *clientTest) doAuthenticate() {
 	c.conn.writeDuration = nil
 }
 
+func (c *clientTest) addToWatchMap() {
+	for _, req := range c.client.sendQueue {
+		c.client.addToWatcherMap(req, nil)
+	}
+}
+
 func TestClient_Authenticate(t *testing.T) {
 	t.Run("check init state", func(t *testing.T) {
 		c, err := newClientInternal([]string{"server01"}, 6*time.Second)
@@ -269,7 +275,7 @@ func TestClient_Authenticate(t *testing.T) {
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
 		c.client.lastZxid.Store(8020)
-		c.client.state = StateDisconnected
+		c.client.state = StateHasSession
 
 		c.client.Get(
 			"/workers01", func(resp GetResponse, err error) {},
@@ -279,9 +285,13 @@ func TestClient_Authenticate(t *testing.T) {
 			"/workers02", func(resp GetResponse, err error) {},
 			WithGetWatch(func(ev Event) {}),
 		)
-		assert.Equal(t, 0, len(c.client.sendQueue))
+		c.addToWatchMap()
+
+		c.client.state = StateDisconnected
+
+		assert.Equal(t, 2, len(c.client.sendQueue))
 		assert.Equal(t, 2, len(c.client.watchers))
-		assert.Equal(t, 2, len(c.client.handleQueue))
+		assert.Equal(t, 0, len(c.client.handleQueue))
 
 		var err error
 
@@ -297,8 +307,9 @@ func TestClient_Authenticate(t *testing.T) {
 
 		// check state
 		assert.Equal(t, StateExpired, c.client.state)
+		assert.Equal(t, 2, len(c.client.sendQueue))
 		assert.Equal(t, 0, len(c.client.watchers))
-		assert.Equal(t, 2, len(c.client.handleQueue))
+		assert.Equal(t, 0, len(c.client.handleQueue))
 	})
 
 	t.Run("session reconnect reapply watches", func(t *testing.T) {
@@ -320,6 +331,10 @@ func TestClient_Authenticate(t *testing.T) {
 			"/workers02", func(resp GetResponse, err error) {},
 			WithGetWatch(func(ev Event) {}),
 		)
+
+		assert.Equal(t, 0, len(c.client.watchers))
+		c.addToWatchMap()
+
 		assert.Equal(t, 2, len(c.client.sendQueue))
 		assert.Equal(t, 2, len(c.client.watchers))
 		assert.Equal(t, 0, len(c.client.recvMap))
@@ -390,6 +405,8 @@ func TestClient_Authenticate(t *testing.T) {
 			func(resp ChildrenResponse, err error) {},
 			WithChildrenWatch(func(ev Event) {}),
 		)
+
+		c.addToWatchMap()
 
 		// Do disconnect
 		c.client.disconnectAndClose(conn)
@@ -553,6 +570,9 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 			},
 			WithGetWatch(func(ev Event) {}),
 		)
+
+		c.addToWatchMap()
+
 		assert.Equal(t, 2, len(c.client.sendQueue))
 		assert.Equal(t, 2, len(c.client.watchers))
 		assert.Equal(t, 0, len(c.client.recvMap))

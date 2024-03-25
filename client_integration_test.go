@@ -875,26 +875,36 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		<-ch
 
 		var steps []string
+		var errors []error
 
 		c.Exists("/workers01",
 			func(resp ExistsResponse, err error) {
+				errors = append(errors, err)
+				steps = append(steps, "exists-resp")
 			},
 			WithExistsWatch(func(ev Event) {
 				steps = append(steps, "exists-watch")
 			}),
 		)
 		c.Children("/",
-			func(resp ChildrenResponse, err error) {},
+			func(resp ChildrenResponse, err error) {
+				errors = append(errors, err)
+				steps = append(steps, "children-resp")
+			},
 			WithChildrenWatch(func(ev Event) {
 				steps = append(steps, "children-watch")
 			}),
 		)
 		c.Get("/workers00",
 			func(resp GetResponse, err error) {
+				errors = append(errors, err)
+				steps = append(steps, "get00-resp")
 			}, WithGetWatch(func(ev Event) {
 				steps = append(steps, "get-watch")
 			}),
 		)
+
+		time.Sleep(500 * time.Millisecond)
 
 		_ = c.conn.Close()
 
@@ -904,6 +914,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			nil, 0, WorldACL(PermAll),
 			func(resp CreateResponse, err error) {
 				steps = append(steps, "create01")
+				errors = append(errors, err)
 				mut.Lock()
 				createErr = err
 				mut.Unlock()
@@ -921,6 +932,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			nil, 0, WorldACL(PermAll),
 			func(resp CreateResponse, err error) {
 				steps = append(steps, "create02")
+				errors = append(errors, err)
 				mut.Lock()
 				createErr = err
 				mut.Unlock()
@@ -928,12 +940,16 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		)
 		c.Delete("/workers00", 0, func(resp DeleteResponse, err error) {
 			steps = append(steps, "delete-00")
+			errors = append(errors, err)
 		})
 
 		c.Close()
 
 		assert.Equal(t, nil, createErr)
 		assert.Equal(t, []string{
+			"exists-resp",
+			"children-resp",
+			"get00-resp",
 			"create01",
 			"exists-watch",
 			"children-watch",
@@ -941,6 +957,14 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 			"get-watch",
 			"delete-00",
 		}, steps)
+		assert.Equal(t, []error{
+			ErrNoNode,           // exists
+			nil,                 // children
+			nil,                 // get00
+			ErrConnectionClosed, // create01
+			nil,                 // create02
+			nil,                 // delete-00
+		}, errors)
 
 		assert.Equal(t, 1, reconnectCalls)
 	})

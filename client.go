@@ -133,6 +133,8 @@ type clientRequest struct {
 	request  any
 	response any
 
+	watch clientWatchRequest
+
 	callback func(res any, zxid int64, err error)
 }
 
@@ -658,6 +660,14 @@ func (c *Client) enqueueRequestWithWatcher(
 const watchEventXid int32 = -1
 const pingRequestXid int32 = -2
 
+func (c *Client) addToWatcherMap(req clientRequest, err error) {
+	watch := req.watch
+	pathType := watch.pathType
+	if len(pathType.path) > 0 {
+		c.watchers[pathType] = append(c.watchers[pathType], watch.callback)
+	}
+}
+
 func (c *Client) enqueueAlreadyLocked(
 	opCode int32, request any, response any,
 	callback func(resp any, zxid int64, err error),
@@ -675,6 +685,8 @@ func (c *Client) enqueueAlreadyLocked(
 		request:  request,
 		response: response,
 
+		watch: watch,
+
 		callback: callback,
 	}
 
@@ -684,11 +696,6 @@ func (c *Client) enqueueAlreadyLocked(
 			scheme: r.Scheme,
 			auth:   r.Auth,
 		})
-	}
-
-	pathType := watch.pathType
-	if len(pathType.path) > 0 {
-		c.watchers[pathType] = append(c.watchers[pathType], watch.callback)
 	}
 
 	if c.state == StateHasSession {
@@ -886,6 +893,8 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	}
 
 	c.mut.Lock()
+
+	c.addToWatcherMap(req, err)
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
 		state: c.state,
