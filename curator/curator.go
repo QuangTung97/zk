@@ -1,13 +1,9 @@
 package curator
 
-import (
-	"github.com/QuangTung97/zk"
-)
-
 type Curator struct {
 	initFunc func(sess *Session)
 
-	client *zk.Client
+	client Client
 	sess   *Session
 }
 
@@ -24,7 +20,7 @@ func New(
 	}
 }
 
-func (c *Curator) Begin(client *zk.Client) {
+func (c *Curator) Begin(client Client) {
 	c.client = client
 	c.sess = &Session{
 		state: c,
@@ -45,7 +41,7 @@ func (c *Curator) End() {
 
 type nullClient struct {
 	valid  bool
-	client *zk.Client
+	client Client
 }
 
 func (s *Session) getClient() nullClient {
@@ -58,7 +54,7 @@ func (s *Session) getClient() nullClient {
 	}
 }
 
-func (s *Session) Run(fn func(client *zk.Client)) {
+func (s *Session) Run(fn func(client Client)) {
 	sessClient := s.getClient()
 	if !sessClient.valid {
 		return

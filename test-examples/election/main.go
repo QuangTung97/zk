@@ -65,12 +65,11 @@ func (e *Election) checkElectionStatus(resp zk.ChildrenResponse) (electionStatus
 }
 
 func (e *Election) createEphemeralNode(sess *curator.Session) {
-	sess.Run(func(client *zk.Client) {
+	sess.Run(func(client curator.Client) {
 		p := e.parent + "/node:" + e.nodeID + "-"
 		client.Create(
 			p, nil,
 			zk.FlagEphemeral|zk.FlagSequence,
-			zk.WorldACL(zk.PermAll),
 			func(resp zk.CreateResponse, err error) {
 				if errors.Is(err, zk.ErrConnectionClosed) {
 					sess.AddRetry(e.initFunc)
@@ -86,8 +85,8 @@ func (e *Election) createEphemeralNode(sess *curator.Session) {
 }
 
 func (e *Election) waitForPrevNode(sess *curator.Session, prevZnode string) {
-	sess.Run(func(client *zk.Client) {
-		client.Get(prevZnode, func(resp zk.GetResponse, err error) {
+	sess.Run(func(client curator.Client) {
+		client.GetW(prevZnode, func(resp zk.GetResponse, err error) {
 			if errors.Is(err, zk.ErrConnectionClosed) {
 				sess.AddRetry(e.initFunc)
 				return
@@ -99,17 +98,17 @@ func (e *Election) waitForPrevNode(sess *curator.Session, prevZnode string) {
 			if err != nil {
 				panic(err)
 			}
-		}, zk.WithGetWatch(func(ev zk.Event) {
+		}, func(ev zk.Event) {
 			if ev.Type == zk.EventNodeDeleted {
 				e.initFunc(sess)
 				return
 			}
-		}))
+		})
 	})
 }
 
 func (e *Election) initFunc(sess *curator.Session) {
-	sess.Run(func(client *zk.Client) {
+	sess.Run(func(client curator.Client) {
 		client.Children(e.parent, func(resp zk.ChildrenResponse, err error) {
 			if errors.Is(err, zk.ErrConnectionClosed) {
 				sess.AddRetry(e.initFunc)
@@ -135,26 +134,10 @@ func (e *Election) initFunc(sess *curator.Session) {
 
 func main() {
 	election := &Election{}
-	leaderCurator := curator.New(
-		election.initFunc,
+	factory := curator.NewClientFactory([]string{"localhost"}, "user01", "password01")
+	factory.Start(
+		curator.New(election.initFunc),
 	)
-
-	c, err := zk.NewClient(
-		[]string{"localhost"}, 12*time.Second,
-		zk.WithSessionEstablishedCallback(func(c *zk.Client) {
-			leaderCurator.Begin(c)
-		}),
-		zk.WithReconnectingCallback(func(c *zk.Client) {
-			leaderCurator.Retry()
-		}),
-		zk.WithSessionExpiredCallback(func(c *zk.Client) {
-			leaderCurator.End()
-		}),
-	)
-	if err != nil {
-		panic(err)
-	}
-	defer c.Close()
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)

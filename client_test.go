@@ -870,3 +870,26 @@ func TestClient_Get_After_Expired(t *testing.T) {
 
 	assert.Equal(t, ErrConnectionClosed, getErr)
 }
+
+func TestClient_Exists_With_Add_Watch_With_Error(t *testing.T) {
+	c := newClientTest(t)
+
+	c.client.sessionID = 1234
+	c.client.passwd = emptyPassword
+	c.client.lastZxid.Store(0)
+	c.client.state = StateHasSession
+
+	var existErr error
+	c.client.Exists("/workers01", func(resp ExistsResponse, err error) {
+		existErr = err
+	}, WithExistsWatch(func(ev Event) {
+	}))
+
+	queue := c.client.sendQueue
+	assert.Equal(t, 1, len(queue))
+
+	c.client.addToWatcherMap(queue[0], errors.New("unknown error"))
+
+	assert.Equal(t, 0, len(c.client.watchers))
+	assert.Equal(t, nil, existErr)
+}
