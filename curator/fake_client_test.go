@@ -131,16 +131,19 @@ func TestFakeClient_CreateThenListChildren(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		c := newFakeClientTest()
 
+		var childrenResp zk.ChildrenResponse
 		initFn := func(sess *Session) {
 			sess.Run(func(client Client) {
 				client.Create(
-					"/workers", []byte("data01"), zk.FlagEphemeral,
-					func(resp zk.CreateResponse, err error) {
-						c.addStep("create-resp")
-					},
+					"/workers01", []byte("data01"), zk.FlagEphemeral,
+					func(resp zk.CreateResponse, err error) {},
+				)
+				client.Create(
+					"/workers02", []byte("data01"), zk.FlagEphemeral,
+					func(resp zk.CreateResponse, err error) {},
 				)
 				client.Children("/", func(resp zk.ChildrenResponse, err error) {
-					c.addStep("children-resp")
+					childrenResp = resp
 				})
 			})
 		}
@@ -151,8 +154,23 @@ func TestFakeClient_CreateThenListChildren(t *testing.T) {
 		f1.Start(c1)
 
 		c.store.Begin(client1)
+		assert.Equal(t, []string{"create", "create", "children"}, c.store.PendingCalls(client1))
 
-		assert.Equal(t, []string{"create", "children"}, c.store.PendingCalls(client1))
+		c.store.CreateApply(client1)
+		c.store.CreateApply(client1)
+
+		assert.Equal(t, []string{"children"}, c.store.PendingCalls(client1))
+
+		c.store.ChildrenApply(client1)
+		assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+		assert.Equal(t, zk.ChildrenResponse{
+			Zxid: 102,
+			Children: []string{
+				"workers01",
+				"workers02",
+			},
+		}, childrenResp)
 	})
 }
 
