@@ -1060,6 +1060,120 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		assert.Equal(t, 1, reconnectCalls)
 		assert.Equal(t, []byte("data01"), getResp.Data)
 	})
+
+	t.Run("exists found with watch, then disconnect then data change by set", func(t *testing.T) {
+		var reconnectCalls int
+		c := mustNewClient(t,
+			WithDialRetryDuration(100*time.Millisecond),
+			WithReconnectingCallback(func(c *Client) {
+				reconnectCalls++
+			}),
+		)
+
+		pathVal := "/workers01"
+
+		ch := make(chan struct{})
+		c.Create(pathVal,
+			[]byte("data01"), 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				close(ch)
+			},
+		)
+		<-ch
+
+		var steps []string
+		var errors []error
+
+		c.Exists(pathVal,
+			func(resp ExistsResponse, err error) {
+				steps = append(steps, "exists-resp")
+				errors = append(errors, err)
+			},
+			WithExistsWatch(func(ev Event) {
+				steps = append(steps, "exists-watch")
+			}),
+		)
+
+		time.Sleep(500 * time.Millisecond)
+		_ = c.conn.Close()
+		time.Sleep(500 * time.Millisecond)
+
+		c.Set(pathVal, []byte("data02"), 0, func(resp SetResponse, err error) {
+			steps = append(steps, "set-new-resp")
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"exists-resp",
+			"exists-watch",
+			"set-new-resp",
+		}, steps)
+		assert.Equal(t, []error{
+			nil,
+			nil,
+		}, errors)
+
+		assert.Equal(t, 1, reconnectCalls)
+	})
+
+	t.Run("exists found with watch, then disconnect then data deleted", func(t *testing.T) {
+		var reconnectCalls int
+		c := mustNewClient(t,
+			WithDialRetryDuration(100*time.Millisecond),
+			WithReconnectingCallback(func(c *Client) {
+				reconnectCalls++
+			}),
+		)
+
+		pathVal := "/workers01"
+
+		ch := make(chan struct{})
+		c.Create(pathVal,
+			[]byte("data01"), 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				close(ch)
+			},
+		)
+		<-ch
+
+		var steps []string
+		var errors []error
+
+		c.Exists(pathVal,
+			func(resp ExistsResponse, err error) {
+				steps = append(steps, "exists-resp")
+				errors = append(errors, err)
+			},
+			WithExistsWatch(func(ev Event) {
+				steps = append(steps, "exists-watch")
+			}),
+		)
+
+		time.Sleep(500 * time.Millisecond)
+		_ = c.conn.Close()
+		time.Sleep(500 * time.Millisecond)
+
+		c.Delete(pathVal, 0, func(resp DeleteResponse, err error) {
+			steps = append(steps, "delete-resp")
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"exists-resp",
+			"exists-watch",
+			"delete-resp",
+		}, steps)
+		assert.Equal(t, []error{
+			nil,
+			nil,
+		}, errors)
+
+		assert.Equal(t, 1, reconnectCalls)
+	})
 }
 
 func TestClientInternal_WithSessionExpired(t *testing.T) {
