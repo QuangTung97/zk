@@ -97,7 +97,7 @@ func (f *clientFactoryImpl) Start(callbacks ...SessionCallback) {
 	f.zkClient = zkClient
 
 	zkClient.AddAuth("digest", auth, func(resp zk.AddAuthResponse, err error) {})
-	addAuthDone <- struct{}{}
+	close(addAuthDone)
 }
 
 func (f *clientFactoryImpl) Close() {
