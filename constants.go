@@ -43,10 +43,6 @@ const (
 	EventNodeDeleted         EventType = 2
 	EventNodeDataChanged     EventType = 3
 	EventNodeChildrenChanged EventType = 4
-
-	// EventSession represents a session event.
-	EventSession     EventType = -1
-	EventNotWatching EventType = -2
 )
 
 var (
@@ -55,8 +51,6 @@ var (
 		EventNodeDeleted:         "EventNodeDeleted",
 		EventNodeDataChanged:     "EventNodeDataChanged",
 		EventNodeChildrenChanged: "EventNodeChildrenChanged",
-		EventSession:             "EventSession",
-		EventNotWatching:         "EventNotWatching",
 	}
 )
 
@@ -129,7 +123,6 @@ var (
 	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
 	ErrReconfigDisabled        = errors.New("attempts to perform a reconfiguration operation when reconfiguration feature is disabled")
 	ErrBadArguments            = errors.New("invalid arguments")
-	// ErrInvalidCallback         = errors.New("zk: invalid callback specified")
 
 	errCodeToError = map[ErrCode]error{
 		0:                          nil,
@@ -141,14 +134,13 @@ var (
 		errNodeExists:              ErrNodeExists,
 		errNotEmpty:                ErrNotEmpty,
 		errSessionExpired:          ErrSessionExpired,
-		// errInvalidCallback:         ErrInvalidCallback,
-		errInvalidAcl:        ErrInvalidACL,
-		errAuthFailed:        ErrAuthFailed,
-		errClosing:           ErrClosing,
-		errNothing:           ErrNothing,
-		errSessionMoved:      ErrSessionMoved,
-		errZReconfigDisabled: ErrReconfigDisabled,
-		errBadArguments:      ErrBadArguments,
+		errInvalidAcl:              ErrInvalidACL,
+		errAuthFailed:              ErrAuthFailed,
+		errClosing:                 ErrClosing,
+		errNothing:                 ErrNothing,
+		errSessionMoved:            ErrSessionMoved,
+		errZReconfigDisabled:       ErrReconfigDisabled,
+		errBadArguments:            ErrBadArguments,
 	}
 )
 
