@@ -10,6 +10,7 @@ import (
 )
 
 const client1 curator.FakeClientID = "client1"
+const client2 curator.FakeClientID = "client2"
 const initClient curator.FakeClientID = "init"
 
 func initStore(parent string) *curator.FakeZookeeper {
@@ -35,13 +36,15 @@ func initStore(parent string) *curator.FakeZookeeper {
 	return store
 }
 
-func TestLock(t *testing.T) {
-	e := NewLock("/workers", "node01")
+func TestLock_Single_Client__Success(t *testing.T) {
+	steps := make([]string, 0)
+	l := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
 
 	store := initStore("/workers")
 
-	c := curator.NewFakeClientFactory(store, client1)
-	c.Start(e.Curator())
+	startLock(l, store, client1)
 
 	store.Begin(client1)
 	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
@@ -52,6 +55,150 @@ func TestLock(t *testing.T) {
 	store.CreateApply(client1)
 	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
 
+	assert.Equal(t, []string{}, steps)
+
 	store.ChildrenApply(client1)
 	assert.Equal(t, []string{}, store.PendingCalls(client1))
+
+	assert.Equal(t, []string{
+		"lock-granted",
+	}, steps)
+}
+
+func startLock(l *Lock, store *curator.FakeZookeeper, client curator.FakeClientID) {
+	c := curator.NewFakeClientFactory(store, client)
+	c.Start(l.Curator())
+}
+
+func TestLock_Two_Clients__Concurrent(t *testing.T) {
+	steps := make([]string, 0)
+	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l1, store, client1)
+	startLock(l2, store, client2)
+
+	store.Begin(client1)
+	store.Begin(client2)
+
+	store.ChildrenApply(client1)
+	store.ChildrenApply(client2)
+
+	store.CreateApply(client1)
+	store.CreateApply(client2)
+
+	store.ChildrenApply(client1)
+	store.ChildrenApply(client2)
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client1))
+	assert.Equal(t, []string{"get-w"}, store.PendingCalls(client2))
+
+	store.GetApply(client2)
+
+	// Lock02 Start Granted
+	store.SessionExpired(client1)
+
+	assert.Equal(t, []string{"children"}, store.PendingCalls(client2))
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+	store.ChildrenApply(client2)
+	assert.Equal(t, []string{
+		"lock01-granted",
+		"lock02-granted",
+	}, steps)
+}
+
+func TestLock_Two_Clients__First_Granted__Then_Second_Start(t *testing.T) {
+	steps := make([]string, 0)
+	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l1, store, client1)
+	startLock(l2, store, client2)
+
+	store.Begin(client1)
+	store.Begin(client2)
+
+	store.ChildrenApply(client1)
+	store.CreateApply(client1)
+	store.ChildrenApply(client1)
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client1))
+
+	store.ChildrenApply(client2)
+	store.CreateApply(client2)
+	store.ChildrenApply(client2)
+	store.GetApply(client2)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client2))
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+}
+
+func TestLock_Two_Clients__First_Granted__Then_Expired_Right_Before_Client2_GetData(t *testing.T) {
+	steps := make([]string, 0)
+	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l1, store, client1)
+	startLock(l2, store, client2)
+
+	store.Begin(client1)
+	store.Begin(client2)
+
+	store.ChildrenApply(client1)
+	store.CreateApply(client1)
+	store.ChildrenApply(client1)
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client1))
+
+	store.ChildrenApply(client2)
+	store.CreateApply(client2)
+	store.ChildrenApply(client2)
+
+	store.SessionExpired(client1)
+
+	store.GetApply(client2)
+	store.ChildrenApply(client2)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client2))
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+		"lock02-granted",
+	}, steps)
 }
