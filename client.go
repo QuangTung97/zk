@@ -508,6 +508,8 @@ func (c *Client) authenticate(conn tcpConn) error {
 	if r.SessionID == 0 {
 		c.mut.Lock()
 
+		c.logger.Warnf("Session expired")
+
 		c.sessionID = 0
 		c.passwd = emptyPassword
 		c.lastZxid.Store(0)
@@ -520,8 +522,6 @@ func (c *Client) authenticate(conn tcpConn) error {
 		c.watchers = map[watchPathType][]func(ev clientWatchEvent){}
 
 		c.mut.Unlock()
-
-		c.logger.Warnf("Session expired")
 
 		return ErrSessionExpired
 	}
