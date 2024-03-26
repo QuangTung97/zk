@@ -1009,7 +1009,7 @@ func (c *Client) Create(
 		callback(CreateResponse{Path: r.Path, Zxid: zxid}, nil)
 	}
 
-	if err := ValidatePath(path, false); err != nil {
+	if err := ValidatePath(path, flags&FlagEphemeral != 0); err != nil {
 		c.appendHandleQueueError(opCreate, err, handleCallback)
 		return
 	}
@@ -1398,6 +1398,26 @@ func (c *Client) SetACL(
 	path string, acl []ACL, version int32,
 	callback func(resp SetACLResponse, err error),
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(SetACLResponse{}, err)
+			return
+		}
+		r := resp.(*setAclResponse)
+		callback(SetACLResponse{
+			Zxid: zxid,
+			Stat: r.Stat,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opSetAcl, err, handleCallback)
+		return
+	}
+
 	c.enqueueRequest(
 		opSetAcl,
 		&setAclRequest{
@@ -1406,20 +1426,7 @@ func (c *Client) SetACL(
 			Version: version,
 		},
 		&setAclResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(SetACLResponse{}, err)
-				return
-			}
-			r := resp.(*setAclResponse)
-			callback(SetACLResponse{
-				Zxid: zxid,
-				Stat: r.Stat,
-			}, nil)
-		},
+		handleCallback,
 	)
 }
 
@@ -1434,26 +1441,33 @@ func (c *Client) GetACL(
 	path string,
 	callback func(resp GetACLResponse, err error),
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(GetACLResponse{}, err)
+			return
+		}
+		r := resp.(*getAclResponse)
+		callback(GetACLResponse{
+			Zxid: zxid,
+			ACL:  r.Acl,
+			Stat: r.Stat,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opGetAcl, err, handleCallback)
+		return
+	}
+
 	c.enqueueRequest(
 		opGetAcl,
 		&getAclRequest{
 			Path: path,
 		},
 		&getAclResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(GetACLResponse{}, err)
-				return
-			}
-			r := resp.(*getAclResponse)
-			callback(GetACLResponse{
-				Zxid: zxid,
-				ACL:  r.Acl,
-				Stat: r.Stat,
-			}, nil)
-		},
+		handleCallback,
 	)
 }

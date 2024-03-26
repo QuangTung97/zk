@@ -1577,6 +1577,23 @@ func TestClientIntegration_WithInvalidPath(t *testing.T) {
 		}, errors)
 	})
 
+	t.Run("create-ephemeral", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Create("/hello/", nil, FlagEphemeral|FlagSequence, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrNoNode,
+		}, errors)
+	})
+
 	t.Run("children", func(t *testing.T) {
 		c := mustNewClient(t)
 
@@ -1612,6 +1629,36 @@ func TestClientIntegration_WithInvalidPath(t *testing.T) {
 
 		var errors []error
 		c.Delete("/hello/", 0, func(resp DeleteResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+
+	t.Run("set acl", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.SetACL("/hello/", WorldACL(PermAll), 0, func(resp SetACLResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+
+	t.Run("get acl", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.GetACL("/hello/", func(resp GetACLResponse, err error) {
 			errors = append(errors, err)
 		})
 
