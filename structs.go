@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 	"reflect"
 	"runtime"
 	"strings"
@@ -16,12 +15,6 @@ var (
 	ErrPtrExpected        = errors.New("zk: encode/decode expect a non-nil pointer to struct")
 	ErrShortBuffer        = errors.New("zk: buffer too small")
 )
-
-type defaultLogger struct{}
-
-func (defaultLogger) Printf(format string, a ...interface{}) {
-	log.Printf(format, a...)
-}
 
 type ACL struct {
 	Perms  int32
