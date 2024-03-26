@@ -69,6 +69,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 					Flags: zk.FlagEphemeral,
 					Stat: zk.Stat{
 						Czxid: 101,
+						Mzxid: 101,
 					},
 					SessionID: 501,
 				},
@@ -123,6 +124,7 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 					Flags: zk.FlagEphemeral,
 					Stat: zk.Stat{
 						Czxid: 101,
+						Mzxid: 101,
 					},
 					SessionID: 501,
 				},
@@ -491,6 +493,10 @@ func TestFakeClient_Create_Then_Getw_Then_Set(t *testing.T) {
 	assert.Equal(t, zk.GetResponse{
 		Zxid: 101,
 		Data: []byte("data01"),
+		Stat: zk.Stat{
+			Czxid: 101,
+			Mzxid: 101,
+		},
 	}, getResp)
 	assert.Equal(t, zk.Event{
 		Type:  zk.EventNodeDataChanged,
@@ -609,6 +615,9 @@ func TestFakeClient_Create_With_Sequence(t *testing.T) {
 	c.startCuratorClient1(initFn)
 
 	c.store.Begin(client1)
+
+	c.store.PrintPendingCalls()
+
 	assert.Equal(t, []string{"create", "create", "children"}, c.store.PendingCalls(client1))
 
 	c.store.CreateApply(client1)
@@ -713,6 +722,94 @@ func TestFakeClient_Create_With_Ephemeral_On_Two_Clients(t *testing.T) {
 		Zxid:     103,
 		Children: []string{"node02"},
 	}, childrenResp)
+}
+
+func TestFakeClient_Session_Expired_Another_Client_Watch_Children_And_Watch_Data(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var childrenResp zk.ChildrenResponse
+	var getResp zk.GetResponse
+	var watchEvents []zk.Event
+
+	NewFakeClientFactory(c.store, client1).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node01", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+		})
+	}))
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				childrenResp = resp
+				errors = append(errors, err)
+				c.addStep("children-resp")
+			}, func(ev zk.Event) {
+				watchEvents = append(watchEvents, ev)
+				c.addStep("children-watch")
+			})
+			client.GetW("/node01", func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+				getResp = resp
+				c.addStep("get-resp")
+			}, func(ev zk.Event) {
+				watchEvents = append(watchEvents, ev)
+				c.addStep("get-watch")
+			})
+		})
+	}))
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.CreateApply(client1)
+
+	c.store.ChildrenApply(client2)
+	c.store.GetApply(client2)
+
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+	assert.Equal(t, []string{}, c.store.PendingCalls(client2))
+
+	c.store.SessionExpired(client1)
+
+	assert.Equal(t, []error{nil, nil, nil}, errors)
+	assert.Equal(t, []string{
+		"children-resp",
+		"get-resp",
+		"children-watch",
+		"get-watch",
+	}, c.steps)
+
+	assert.Equal(t, zk.ChildrenResponse{
+		Zxid:     101,
+		Children: []string{"node01"},
+	}, childrenResp)
+
+	assert.Equal(t, zk.GetResponse{
+		Zxid: 101,
+		Data: []byte("data01"),
+		Stat: zk.Stat{
+			Czxid: 101,
+			Mzxid: 101,
+		},
+	}, getResp)
+
+	assert.Equal(t, []zk.Event{
+		{
+			Type:  zk.EventNodeChildrenChanged,
+			State: 3,
+			Path:  "/",
+		},
+		{
+			Type:  zk.EventNodeDeleted,
+			State: 3,
+			Path:  "/node01",
+		},
+	}, watchEvents)
 }
 
 func TestComputePathNodes(t *testing.T) {

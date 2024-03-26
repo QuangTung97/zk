@@ -3,6 +3,7 @@ package curator
 import (
 	"fmt"
 	stdpath "path"
+	"reflect"
 	"slices"
 
 	"github.com/QuangTung97/zk"
@@ -124,7 +125,7 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	s.runAllCallbacksWithConnectionError(clientID)
 
 	s.Zxid++
-	s.deleteNodesRecursiveForSessionID(s.Root, sessionID)
+	s.deleteNodesRecursiveForSessionID(s.Root, "", sessionID)
 
 	callbacks := s.Sessions[clientID]
 	for _, cb := range callbacks {
@@ -132,16 +133,19 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	}
 }
 
-func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, sessionID int64) {
+func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, path string, sessionID int64) {
 	var newChildren []*ZNode
 	for _, child := range parent.Children {
+		childPath := path + "/" + child.Name
 		if child.Flags&zk.FlagEphemeral == 0 {
-			s.deleteNodesRecursiveForSessionID(child, sessionID)
+			s.deleteNodesRecursiveForSessionID(child, childPath, sessionID)
 			newChildren = append(newChildren, child)
 			continue
 		}
 
 		if child.SessionID == sessionID {
+			s.notifyChildrenWatches(parent, childPath)
+			s.notifyDataWatches(child, childPath, zk.EventNodeDeleted)
 			continue
 		}
 		newChildren = append(newChildren, child)
@@ -197,14 +201,15 @@ func getActionWithType[T any](s *FakeZookeeper, clientID FakeClientID, methodNam
 }
 
 func (s *FakeZookeeper) PrintPendingCalls() {
-	for client, m := range s.Pending {
-		if len(m) == 0 {
+	for client, actions := range s.Pending {
+		if len(actions) == 0 {
 			continue
 		}
 		fmt.Println("------------------------------------------------")
 		fmt.Println("CLIENT:", client)
-		for _, inputs := range m {
-			fmt.Println("  ", inputs)
+		for _, input := range actions {
+			typeName := reflect.TypeOf(input).Name()
+			fmt.Printf("  %s: %+v\n", typeName, input)
 		}
 	}
 	if len(s.Pending) > 0 {
@@ -275,23 +280,28 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 		Flags: input.Flags,
 		Stat: zk.Stat{
 			Czxid: s.Zxid,
+			Mzxid: s.Zxid,
 		},
 		SessionID: s.States[clientID].SessionID,
 	})
 
-	for _, w := range parent.ChildrenWatches {
-		w(zk.Event{
-			Type:  zk.EventNodeChildrenChanged,
-			State: 3,
-			Path:  stdpath.Dir(input.Path),
-		})
-	}
-	parent.ChildrenWatches = nil
+	s.notifyChildrenWatches(parent, input.Path)
 
 	input.Callback(zk.CreateResponse{
 		Zxid: s.Zxid,
 		Path: input.Path,
 	}, nil)
+}
+
+func (s *FakeZookeeper) notifyChildrenWatches(parent *ZNode, path string) {
+	for _, w := range parent.ChildrenWatches {
+		w(zk.Event{
+			Type:  zk.EventNodeChildrenChanged,
+			State: 3,
+			Path:  stdpath.Dir(path),
+		})
+	}
+	parent.ChildrenWatches = nil
 }
 
 func (s *FakeZookeeper) ConnError(clientID FakeClientID) {
@@ -337,6 +347,7 @@ func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
 	input.Callback(zk.GetResponse{
 		Zxid: s.Zxid,
 		Data: node.Data,
+		Stat: node.Stat,
 	}, nil)
 }
 
@@ -360,19 +371,23 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 	node.Stat.Version++
 	node.Stat.Mzxid = s.Zxid
 
-	for _, w := range node.DataWatches {
-		w(zk.Event{
-			Type:  zk.EventNodeDataChanged,
-			State: 3,
-			Path:  input.Path,
-		})
-	}
-	node.DataWatches = nil
+	s.notifyDataWatches(node, input.Path, zk.EventNodeDataChanged)
 
 	input.Callback(zk.SetResponse{
 		Zxid: s.Zxid,
 		Stat: node.Stat,
 	}, nil)
+}
+
+func (s *FakeZookeeper) notifyDataWatches(node *ZNode, path string, eventType zk.EventType) {
+	for _, w := range node.DataWatches {
+		w(zk.Event{
+			Type:  eventType,
+			State: 3,
+			Path:  path,
+		})
+	}
+	node.DataWatches = nil
 }
 
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
