@@ -262,7 +262,6 @@ func TestClient_Authenticate(t *testing.T) {
 
 		queue[0].req.callback = nil
 		assert.Equal(t, handleEvent{
-			state: StateExpired,
 			req: clientRequest{
 				opcode: opWatcherEvent,
 			},
@@ -759,8 +758,7 @@ func TestClient_RecvData(t *testing.T) {
 		// Check Handle Queue
 		assert.Equal(t, 1, len(c.client.handleQueue))
 		assert.Equal(t, handleEvent{
-			state: StateHasSession,
-			zxid:  71,
+			zxid: 71,
 			req: clientRequest{
 				xid:     xid1,
 				opcode:  opCreate,
@@ -812,8 +810,7 @@ func TestClient_RecvData(t *testing.T) {
 		callback := queue[0].req.callback
 		queue[0].req.callback = nil
 		assert.Equal(t, handleEvent{
-			state: StateHasSession,
-			zxid:  73,
+			zxid: 73,
 			req: clientRequest{
 				xid:    -1,
 				opcode: opWatcherEvent,

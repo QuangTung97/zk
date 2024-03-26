@@ -65,6 +65,11 @@ func stringShuffleRand(s []string, r *rand.Rand) {
 	}
 }
 
+// ValidatePath will make sure a path is valid before sending the request
+func ValidatePath(path string, isSequential bool) error {
+	return validatePath(path, isSequential)
+}
+
 // validatePath will make sure a path is valid before sending the request
 func validatePath(path string, isSequential bool) error {
 	if path == "" {

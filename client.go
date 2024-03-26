@@ -139,10 +139,9 @@ type clientRequest struct {
 }
 
 type handleEvent struct {
-	state State
-	zxid  int64
-	err   error
-	req   clientRequest
+	zxid int64
+	err  error
+	req  clientRequest
 }
 
 type clientWatchEvent struct {
@@ -556,7 +555,6 @@ func (c *Client) reapplyAuthCreds() {
 
 func (c *Client) appendHandleQueueGlobalEvent(callback func(c *Client)) {
 	c.handleQueue = append(c.handleQueue, handleEvent{
-		state: c.state,
 		req: clientRequest{
 			opcode:   opWatcherEvent,
 			response: nil,
@@ -713,14 +711,27 @@ func (c *Client) enqueueAlreadyLocked(
 		return
 	}
 
-	err := ErrConnectionClosed
+	c.appendHandleQueue(req, ErrConnectionClosed)
+}
 
+func (c *Client) appendHandleQueue(req clientRequest, err error) {
 	c.handleQueue = append(c.handleQueue, handleEvent{
-		state: c.state,
-		err:   err,
-		req:   req,
+		err: err,
+		req: req,
 	})
 	c.handleCond.Signal()
+}
+
+func (c *Client) appendHandleQueueError(
+	opCode int32, err error,
+	callback func(res any, zxid int64, err error),
+) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	c.appendHandleQueue(clientRequest{
+		opcode:   opCode,
+		callback: callback,
+	}, err)
 }
 
 func (c *Client) disconnectAndClose(conn tcpConn) {
@@ -738,18 +749,16 @@ func (c *Client) updateStateAndFlushRequests(finalState State) bool {
 
 	for _, req := range c.recvMap {
 		events = append(events, handleEvent{
-			state: c.state,
-			err:   ErrConnectionClosed,
-			req:   req,
+			err: ErrConnectionClosed,
+			req: req,
 		})
 	}
 	c.recvMap = map[int32]clientRequest{}
 
 	for _, req := range c.sendQueue {
 		events = append(events, handleEvent{
-			state: c.state,
-			err:   ErrConnectionClosed,
-			req:   req,
+			err: ErrConnectionClosed,
+			req: req,
 		})
 	}
 	c.sendQueue = nil
@@ -903,10 +912,9 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	c.addToWatcherMap(req, err)
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
-		state: c.state,
-		zxid:  res.Zxid,
-		req:   req,
-		err:   err,
+		zxid: res.Zxid,
+		req:  req,
+		err:  err,
 	})
 	c.handleCond.Signal()
 }
@@ -938,8 +946,7 @@ func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res respon
 	}
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
-		state: c.state,
-		zxid:  res.Zxid,
+		zxid: res.Zxid,
 		req: clientRequest{
 			xid:      watchEventXid,
 			opcode:   opWatcherEvent,
@@ -1119,6 +1126,27 @@ func (c *Client) Get(
 	callback func(resp GetResponse, err error),
 	options ...GetOption,
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(GetResponse{}, err)
+			return
+		}
+		r := resp.(*getDataResponse)
+		callback(GetResponse{
+			Zxid: zxid,
+			Data: r.Data,
+			Stat: r.Stat,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opGetData, err, handleCallback)
+		return
+	}
+
 	opts := getOpts{
 		watch: false,
 	}
@@ -1152,21 +1180,7 @@ func (c *Client) Get(
 			Watch: opts.watch,
 		},
 		&getDataResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(GetResponse{}, err)
-				return
-			}
-			r := resp.(*getDataResponse)
-			callback(GetResponse{
-				Zxid: zxid,
-				Data: r.Data,
-				Stat: r.Stat,
-			}, nil)
-		},
+		handleCallback,
 		watch,
 	)
 }

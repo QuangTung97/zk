@@ -1545,3 +1545,20 @@ func TestClientIntegration_Delete_Empty_Node(t *testing.T) {
 		ErrNoNode,
 	}, errors)
 }
+
+func TestClientIntegration_WithInvalidPath(t *testing.T) {
+	t.Run("get", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Get("/hello/", func(resp GetResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+}

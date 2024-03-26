@@ -120,3 +120,19 @@ func TestValidatePath(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePath2(t *testing.T) {
+	assert.Equal(t, ErrInvalidPath, validatePath("home", false))
+	assert.Equal(t, nil, validatePath("/", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/config/", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/\x00", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("//hello", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/\x01", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/hello/./config", false))
+	assert.Equal(t, nil, validatePath("/hello/.config", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/hello/config/.", false))
+	assert.Equal(t, ErrInvalidPath, validatePath("/hello/../config", false))
+	assert.Equal(t, nil, validatePath("/hello/..config", false))
+	assert.Equal(t, nil, validatePath("/data/", true))
+}
