@@ -47,6 +47,8 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 type Client struct {
 	servers []string
 
+	logger Logger
+
 	dialRetryDuration time.Duration
 
 	writeCodec    codecBuffer // not need to lock
@@ -188,6 +190,8 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 	c := &Client{
 		servers: servers,
 
+		logger: &defaultLoggerImpl{},
+
 		dialRetryDuration: 2 * time.Second,
 
 		state:  StateDisconnected,
@@ -300,14 +304,19 @@ func (c *Client) doConnect() (tcpConn, bool) {
 	c.state = StateConnecting
 	c.mut.Unlock()
 
+	c.logger.Infof("Connecting to address: '%s'", c.servers[0])
+
 	// TODO Server Selector
 	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout*10)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
 		c.mut.Unlock()
+		c.logger.Warnf("Failed to connect to server: '%s', error: %v", c.servers[0], err)
 		return nil, false
 	}
+
+	c.logger.Infof("Connected to server: '%s'", c.servers[0])
 
 	conn := &tcpConnImpl{
 		conn: netConn,
@@ -512,6 +521,8 @@ func (c *Client) authenticate(conn tcpConn) error {
 
 		c.mut.Unlock()
 
+		c.logger.Warnf("Session expired")
+
 		return ErrSessionExpired
 	}
 
@@ -568,10 +579,12 @@ func (c *Client) appendHandleQueueGlobalEvent(callback func(c *Client)) {
 
 func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
 	if c.sessEstablishedCallback != nil && prevIsZero {
+		c.logger.Infof("Session established")
 		c.appendHandleQueueGlobalEvent(c.sessEstablishedCallback)
 	}
 
 	if c.reconnectingCallback != nil && !prevIsZero {
+		c.logger.Warnf("Connection is reconnected")
 		c.appendHandleQueueGlobalEvent(c.reconnectingCallback)
 	}
 }
@@ -737,6 +750,7 @@ func (c *Client) appendHandleQueueError(
 func (c *Client) disconnectAndClose(conn tcpConn) {
 	ok := c.disconnect(conn)
 	if ok {
+		c.logger.Warnf("Close connection")
 		_ = conn.Close()
 	}
 }
@@ -985,6 +999,8 @@ func (c *Client) Close() {
 	if conn != nil {
 		_ = conn.Close()
 	}
+
+	c.logger.Infof("Shutdown completed")
 }
 
 type CreateResponse struct {
