@@ -997,6 +997,23 @@ func (c *Client) Create(
 	path string, data []byte, flags int32, acl []ACL,
 	callback func(resp CreateResponse, err error),
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(CreateResponse{}, err)
+			return
+		}
+		r := resp.(*createResponse)
+		callback(CreateResponse{Path: r.Path, Zxid: zxid}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opCreate, err, handleCallback)
+		return
+	}
+
 	c.enqueueRequest(
 		opCreate,
 		&CreateRequest{
@@ -1006,17 +1023,7 @@ func (c *Client) Create(
 			Acl:   acl,
 		},
 		&createResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(CreateResponse{}, err)
-				return
-			}
-			r := resp.(*createResponse)
-			callback(CreateResponse{Path: r.Path, Zxid: zxid}, nil)
-		},
+		handleCallback,
 	)
 }
 
@@ -1047,6 +1054,26 @@ func (c *Client) Children(
 	callback func(resp ChildrenResponse, err error),
 	options ...ChildrenOption,
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(ChildrenResponse{}, err)
+			return
+		}
+		r := resp.(*getChildren2Response)
+		callback(ChildrenResponse{
+			Zxid:     zxid,
+			Children: r.Children,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opGetChildren2, err, handleCallback)
+		return
+	}
+
 	opts := childrenOpts{
 		watch: false,
 	}
@@ -1080,20 +1107,7 @@ func (c *Client) Children(
 			Watch: opts.watch,
 		},
 		&getChildren2Response{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(ChildrenResponse{}, err)
-				return
-			}
-			r := resp.(*getChildren2Response)
-			callback(ChildrenResponse{
-				Zxid:     zxid,
-				Children: r.Children,
-			}, nil)
-		},
+		handleCallback,
 		watch,
 	)
 }
@@ -1246,6 +1260,26 @@ func (c *Client) Exists(
 	callback func(resp ExistsResponse, err error),
 	options ...ExistsOption,
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(ExistsResponse{}, err)
+			return
+		}
+		r := resp.(*existsResponse)
+		callback(ExistsResponse{
+			Zxid: zxid,
+			Stat: r.Stat,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opExists, err, handleCallback)
+		return
+	}
+
 	opts := existsOpts{
 		watch: false,
 	}
@@ -1279,20 +1313,7 @@ func (c *Client) Exists(
 			Watch: opts.watch,
 		},
 		&existsResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(ExistsResponse{}, err)
-				return
-			}
-			r := resp.(*existsResponse)
-			callback(ExistsResponse{
-				Zxid: zxid,
-				Stat: r.Stat,
-			}, nil)
-		},
+		handleCallback,
 		watch,
 	)
 }
@@ -1305,6 +1326,24 @@ func (c *Client) Delete(
 	path string, version int32,
 	callback func(resp DeleteResponse, err error),
 ) {
+	handleCallback := func(resp any, zxid int64, err error) {
+		if callback == nil {
+			return
+		}
+		if err != nil {
+			callback(DeleteResponse{}, err)
+			return
+		}
+		callback(DeleteResponse{
+			Zxid: zxid,
+		}, nil)
+	}
+
+	if err := ValidatePath(path, false); err != nil {
+		c.appendHandleQueueError(opDelete, err, handleCallback)
+		return
+	}
+
 	c.enqueueRequest(
 		opDelete,
 		&DeleteRequest{
@@ -1312,18 +1351,7 @@ func (c *Client) Delete(
 			Version: version,
 		},
 		&deleteResponse{},
-		func(resp any, zxid int64, err error) {
-			if callback == nil {
-				return
-			}
-			if err != nil {
-				callback(DeleteResponse{}, err)
-				return
-			}
-			callback(DeleteResponse{
-				Zxid: zxid,
-			}, nil)
-		},
+		handleCallback,
 	)
 }
 

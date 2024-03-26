@@ -1561,4 +1561,64 @@ func TestClientIntegration_WithInvalidPath(t *testing.T) {
 			ErrInvalidPath,
 		}, errors)
 	})
+
+	t.Run("create", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Create("/hello/", nil, 0, WorldACL(PermAll), func(resp CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+
+	t.Run("children", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Children("/hello/", func(resp ChildrenResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+
+	t.Run("exists", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Exists("/hello/", func(resp ExistsResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var errors []error
+		c.Delete("/hello/", 0, func(resp DeleteResponse, err error) {
+			errors = append(errors, err)
+		})
+
+		c.Close()
+
+		assert.Equal(t, []error{
+			ErrInvalidPath,
+		}, errors)
+	})
 }
