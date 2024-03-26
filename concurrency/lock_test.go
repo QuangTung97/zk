@@ -1,6 +1,7 @@
 package concurrency
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -314,4 +315,14 @@ func TestLock_Two_Clients__Second_Get_Watch_Error(t *testing.T) {
 	store.Retry(client2)
 
 	assert.Equal(t, []string{"children"}, store.PendingCalls(client2))
+}
+
+func TestSortString(t *testing.T) {
+	s := []string{
+		"A", "B", "EE", "D", "M", "Z", "IY", "IA",
+	}
+	slices.SortFunc(s, stringCmp)
+	assert.Equal(t, []string{
+		"A", "B", "D", "EE", "IA", "IY", "M", "Z",
+	}, s)
 }

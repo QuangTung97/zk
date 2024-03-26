@@ -864,6 +864,22 @@ func TestFakeClient_Get_With_Not_Found_And_Found(t *testing.T) {
 	}, getRespList)
 }
 
+func TestFakeClient_Set_Validate_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Set("/sample/", nil, 0, func(resp zk.SetResponse, err error) {
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	assert.PanicsWithValue(t, zk.ErrInvalidPath, func() {
+		c.store.Begin(client1)
+	})
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",

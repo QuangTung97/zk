@@ -429,6 +429,7 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) Get(path string, callback func(resp zk.GetResponse, err error)) {
+	validatePath(path)
 	input := GetInput{
 		Path:     path,
 		Callback: callback,
@@ -440,6 +441,7 @@ func (c *fakeClient) GetW(path string,
 	callback func(resp zk.GetResponse, err error),
 	watcher func(ev zk.Event),
 ) {
+	validatePath(path)
 	input := GetInput{
 		Path:     path,
 		Callback: callback,
@@ -454,6 +456,7 @@ func (s *FakeZookeeper) appendActions(clientID FakeClientID, action any) {
 }
 
 func (c *fakeClient) Children(path string, callback func(resp zk.ChildrenResponse, err error)) {
+	validatePath(path)
 	input := ChildrenInput{
 		Path:     path,
 		Callback: callback,
@@ -465,6 +468,7 @@ func (c *fakeClient) ChildrenW(path string,
 	callback func(resp zk.ChildrenResponse, err error),
 	watcher func(ev zk.Event),
 ) {
+	validatePath(path)
 	input := ChildrenInput{
 		Path:     path,
 		Callback: callback,
@@ -478,6 +482,7 @@ func (c *fakeClient) Create(
 	path string, data []byte, flags int32,
 	callback func(resp zk.CreateResponse, err error),
 ) {
+	validatePath(path)
 	input := CreateInput{
 		Path:     path,
 		Data:     data,
@@ -487,12 +492,11 @@ func (c *fakeClient) Create(
 	c.store.appendActions(c.clientID, input)
 }
 
-// TODO Validate Paths
-
 func (c *fakeClient) Set(
 	path string, data []byte, version int32,
 	callback func(resp zk.SetResponse, err error),
 ) {
+	validatePath(path)
 	input := SetInput{
 		Path:     path,
 		Data:     data,
@@ -500,4 +504,10 @@ func (c *fakeClient) Set(
 		Callback: callback,
 	}
 	c.store.appendActions(c.clientID, input)
+}
+
+func validatePath(path string) {
+	if err := zk.ValidatePath(path, false); err != nil {
+		panic(err)
+	}
 }
