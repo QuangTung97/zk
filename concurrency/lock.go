@@ -164,5 +164,4 @@ func (e *Lock) watchPreviousNode(sess *curator.Session, prevNode string) {
 
 func (e *Lock) Curator() *curator.Curator {
 	return e.cur
-
 }

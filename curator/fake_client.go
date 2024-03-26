@@ -84,6 +84,9 @@ func (c *fakeClientFactory) Start(callbacks ...SessionCallback) {
 	}
 }
 
+func (c *fakeClientFactory) Close() {
+}
+
 func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	state := s.States[clientID]
 	if state.HasSession {
@@ -475,6 +478,8 @@ func (c *fakeClient) Create(
 	}
 	c.store.appendActions(c.clientID, input)
 }
+
+// TODO Validate Paths
 
 func (c *fakeClient) Set(
 	path string, data []byte, version int32,

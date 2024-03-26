@@ -14,6 +14,7 @@ type SessionCallback interface {
 
 type ClientFactory interface {
 	Start(callbacks ...SessionCallback)
+	Close()
 }
 
 type Client interface {
@@ -57,9 +58,15 @@ type clientFactoryImpl struct {
 
 	username string
 	password string
+
+	zkClient *zk.Client
 }
 
 func (f *clientFactoryImpl) Start(callbacks ...SessionCallback) {
+	if f.zkClient != nil {
+		panic("Start should only be called once")
+	}
+
 	auth := []byte(f.username + ":" + f.password)
 	acl := zk.DigestACL(zk.PermAll, f.username, f.password)
 
@@ -87,9 +94,16 @@ func (f *clientFactoryImpl) Start(callbacks ...SessionCallback) {
 	if err != nil {
 		panic(err)
 	}
+	f.zkClient = zkClient
 
 	zkClient.AddAuth("digest", auth, func(resp zk.AddAuthResponse, err error) {})
 	addAuthDone <- struct{}{}
+}
+
+func (f *clientFactoryImpl) Close() {
+	if f.zkClient != nil {
+		f.zkClient.Close()
+	}
 }
 
 func NewClient(zkClient *zk.Client, acl []zk.ACL) Client {
