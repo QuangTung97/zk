@@ -307,7 +307,7 @@ func (c *Client) doConnect() (tcpConn, bool) {
 	c.logger.Infof("Connecting to address: '%s'", c.servers[0])
 
 	// TODO Server Selector
-	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout*10)
+	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
