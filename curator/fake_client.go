@@ -234,7 +234,11 @@ func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 				values = append(values, "children")
 			}
 		case GetInput:
-			values = append(values, "get-w")
+			if inputVal.Watch {
+				values = append(values, "get-w")
+			} else {
+				values = append(values, "get")
+			}
 		case CreateInput:
 			values = append(values, "create")
 		case SetInput:
@@ -425,7 +429,11 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) Get(path string, callback func(resp zk.GetResponse, err error)) {
-	panic("TODO")
+	input := GetInput{
+		Path:     path,
+		Callback: callback,
+	}
+	c.store.appendActions(c.clientID, input)
 }
 
 func (c *fakeClient) GetW(path string,

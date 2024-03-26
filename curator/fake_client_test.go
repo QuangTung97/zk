@@ -812,6 +812,58 @@ func TestFakeClient_Session_Expired_Another_Client_Watch_Children_And_Watch_Data
 	}, watchEvents)
 }
 
+func TestFakeClient_Get_With_Not_Found_And_Found(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var getRespList []zk.GetResponse
+
+	const pathValue = "/node01"
+
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Get(pathValue, func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+				getRespList = append(getRespList, resp)
+			})
+
+			client.Create(pathValue, []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					errors = append(errors, err)
+				},
+			)
+
+			client.Get(pathValue, func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+				getRespList = append(getRespList, resp)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"get", "create", "get"}, c.store.PendingCalls(client1))
+
+	c.store.GetApply(client1)
+	c.store.CreateApply(client1)
+	c.store.GetApply(client1)
+
+	assert.Equal(t, []error{
+		zk.ErrNoNode, nil, nil,
+	}, errors)
+	assert.Equal(t, []zk.GetResponse{
+		{},
+		{
+			Zxid: 101,
+			Data: []byte("data01"),
+			Stat: zk.Stat{
+				Czxid: 101,
+				Mzxid: 101,
+			},
+		},
+	}, getRespList)
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",
