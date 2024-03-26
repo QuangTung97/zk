@@ -106,11 +106,14 @@ func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID
 		switch inputVal := input.(type) {
 		case CreateInput:
 			inputVal.Callback(zk.CreateResponse{}, zk.ErrConnectionClosed)
+		case ChildrenInput:
+			inputVal.Callback(zk.ChildrenResponse{}, zk.ErrConnectionClosed)
+		case GetInput:
+			inputVal.Callback(zk.GetResponse{}, zk.ErrConnectionClosed)
 		default:
 			panic("unknown input type")
 		}
 	}
-
 }
 
 func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
@@ -253,6 +256,14 @@ func (s *FakeZookeeper) popFirst(clientID FakeClientID) {
 }
 
 func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
+	s.createApplyWithErr(clientID, nil)
+}
+
+func (s *FakeZookeeper) CreateApplyError(clientID FakeClientID) {
+	s.createApplyWithErr(clientID, zk.ErrConnectionClosed)
+}
+
+func (s *FakeZookeeper) createApplyWithErr(clientID FakeClientID, err error) {
 	input := s.CreateCall(clientID)
 	parent := s.findNode(stdpath.Dir(input.Path))
 	if parent == nil {
@@ -286,6 +297,12 @@ func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	})
 
 	s.notifyChildrenWatches(parent, input.Path)
+
+	if err != nil {
+		input.Callback(zk.CreateResponse{}, err)
+		s.ConnError(clientID)
+		return
+	}
 
 	input.Callback(zk.CreateResponse{
 		Zxid: s.Zxid,

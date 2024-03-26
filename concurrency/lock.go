@@ -39,6 +39,10 @@ func (e *Lock) initFunc(sess *curator.Session) {
 	sess.Run(func(client curator.Client) {
 		client.Children(e.parent, func(resp zk.ChildrenResponse, err error) {
 			if err != nil {
+				if errors.Is(err, zk.ErrConnectionClosed) {
+					sess.AddRetry(e.initFunc)
+					return
+				}
 				panic(err)
 			}
 
@@ -122,6 +126,10 @@ func (e *Lock) createEphemeral(sess *curator.Session) {
 		client.Create(p, nil, zk.FlagEphemeral|zk.FlagSequence,
 			func(resp zk.CreateResponse, err error) {
 				if err != nil {
+					if errors.Is(err, zk.ErrConnectionClosed) {
+						sess.AddRetry(e.initFunc)
+						return
+					}
 					panic(err)
 				}
 				e.initFunc(sess)
@@ -138,6 +146,10 @@ func (e *Lock) watchPreviousNode(sess *curator.Session, prevNode string) {
 			}
 			if errors.Is(err, zk.ErrNoNode) {
 				e.initFunc(sess)
+				return
+			}
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(e.initFunc)
 				return
 			}
 			panic(err)

@@ -202,3 +202,116 @@ func TestLock_Two_Clients__First_Granted__Then_Expired_Right_Before_Client2_GetD
 		"lock02-granted",
 	}, steps)
 }
+
+func TestLock_Single_Client__Children_Error(t *testing.T) {
+	steps := make([]string, 0)
+	l := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l, store, client1)
+
+	store.Begin(client1)
+	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
+
+	store.ConnError(client1)
+	assert.Equal(t, []string{"retry"}, store.PendingCalls(client1))
+
+	store.Retry(client1)
+	store.ChildrenApply(client1)
+	store.CreateApply(client1)
+	store.ChildrenApply(client1)
+
+	assert.Equal(t, []string{}, store.PendingCalls(client1))
+
+	assert.Equal(t, []string{
+		"lock-granted",
+	}, steps)
+}
+
+func TestLock_Single_Client__Create_Conn_Error(t *testing.T) {
+	steps := make([]string, 0)
+	l := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l, store, client1)
+
+	store.Begin(client1)
+	store.ChildrenApply(client1)
+
+	store.ConnError(client1)
+	assert.Equal(t, []string{"retry"}, store.PendingCalls(client1))
+
+	store.Retry(client1)
+	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
+}
+
+func TestLock_Single_Client__Create_Apply_Conn_Error(t *testing.T) {
+	steps := make([]string, 0)
+	l := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l, store, client1)
+
+	store.Begin(client1)
+	store.ChildrenApply(client1)
+
+	store.CreateApplyError(client1)
+	assert.Equal(t, []string{"retry"}, store.PendingCalls(client1))
+
+	store.Retry(client1)
+	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
+
+	store.ChildrenApply(client1)
+	assert.Equal(t, []string{}, store.PendingCalls(client1))
+
+	assert.Equal(t, []string{
+		"lock-granted",
+	}, steps)
+}
+
+func TestLock_Two_Clients__Second_Get_Watch_Error(t *testing.T) {
+	steps := make([]string, 0)
+	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
+
+	store := initStore("/workers")
+
+	startLock(l1, store, client1)
+	startLock(l2, store, client2)
+
+	store.Begin(client1)
+	store.Begin(client2)
+
+	store.ChildrenApply(client1)
+	store.CreateApply(client1)
+	store.ChildrenApply(client1)
+
+	assert.Equal(t, []string{
+		"lock01-granted",
+	}, steps)
+
+	store.ChildrenApply(client2)
+	store.CreateApply(client2)
+	store.ChildrenApply(client2)
+
+	assert.Equal(t, []string{"get-w"}, store.PendingCalls(client2))
+
+	store.ConnError(client2)
+	assert.Equal(t, []string{"retry"}, store.PendingCalls(client2))
+	store.Retry(client2)
+
+	assert.Equal(t, []string{"children"}, store.PendingCalls(client2))
+}
