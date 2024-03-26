@@ -129,6 +129,12 @@ func WithDialRetryDuration(d time.Duration) Option {
 	}
 }
 
+func WithLogger(l Logger) Option {
+	return func(c *Client) {
+		c.logger = l
+	}
+}
+
 type clientRequest struct {
 	xid      int32
 	opcode   int32

@@ -4,6 +4,7 @@ package zk
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"slices"
 	"sync"
@@ -1668,4 +1669,78 @@ func TestClientIntegration_WithInvalidPath(t *testing.T) {
 			ErrInvalidPath,
 		}, errors)
 	})
+}
+
+type testLogger struct {
+}
+
+func (*testLogger) Infof(format string, args ...any) {
+	log.Printf("[TEST] [INFO] [ZK] "+format, args...)
+}
+
+func (*testLogger) Warnf(format string, args ...any) {
+	log.Printf("[TEST] [WARN] [ZK] "+format, args...)
+}
+
+func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
+	retryConnectCount := 0
+
+	sess1Chan := make(chan struct{})
+	c1, err := NewClient([]string{"localhost"}, 30*time.Second,
+		WithSessionEstablishedCallback(func(c *Client) {
+			close(sess1Chan)
+		}),
+		WithReconnectingCallback(func(c *Client) {
+			retryConnectCount++
+		}),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	<-sess1Chan
+
+	c1.mut.Lock()
+	sessionID := c1.sessionID
+	passwd := c1.passwd
+	lastZxid := c1.lastZxid.Load()
+	c1.mut.Unlock()
+
+	c2, err := newClientInternal([]string{"localhost"}, 30*time.Second, WithLogger(&testLogger{}))
+	if err != nil {
+		panic(err)
+	}
+
+	c2.sessionID = sessionID
+	c2.passwd = passwd
+	c2.lastZxid.Store(lastZxid)
+
+	fmt.Println("=========================")
+
+	conn, ok := c2.doConnect()
+	assert.Equal(t, true, ok)
+	assert.NotNil(t, conn)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c2.runReceiver()
+	}()
+
+	time.Sleep(300 * time.Millisecond)
+
+	c2.mut.Lock()
+	c2.recvShutdown = true
+	c2.recvCond.Signal()
+	c2.mut.Unlock()
+
+	wg.Wait()
+	if c2.conn != nil {
+		_ = c2.conn.Close()
+	}
+
+	c1.Close()
+
+	assert.Equal(t, 1, retryConnectCount)
 }
