@@ -6,14 +6,8 @@ import (
 	"github.com/QuangTung97/zk"
 )
 
-type SessionCallback interface {
-	Begin(client Client)
-	Retry()
-	End()
-}
-
 type ClientFactory interface {
-	Start(callbacks ...SessionCallback)
+	Start(runner SessionRunner)
 	Close()
 }
 
@@ -62,7 +56,7 @@ type clientFactoryImpl struct {
 	zkClient *zk.Client
 }
 
-func (f *clientFactoryImpl) Start(callbacks ...SessionCallback) {
+func (f *clientFactoryImpl) Start(runner SessionRunner) {
 	if f.zkClient != nil {
 		panic("Start should only be called once")
 	}
@@ -76,19 +70,13 @@ func (f *clientFactoryImpl) Start(callbacks ...SessionCallback) {
 	zkClient, err := zk.NewClient(f.servers, 12*time.Second,
 		zk.WithSessionEstablishedCallback(func(c *zk.Client) {
 			<-addAuthDone
-			for _, cb := range callbacks {
-				cb.Begin(NewClient(c, acl))
-			}
+			runner.Begin(NewClient(c, acl))
 		}),
 		zk.WithReconnectingCallback(func(c *zk.Client) {
-			for _, cb := range callbacks {
-				cb.Retry()
-			}
+			runner.Retry()
 		}),
 		zk.WithSessionExpiredCallback(func(c *zk.Client) {
-			for _, cb := range callbacks {
-				cb.End()
-			}
+			runner.End()
 		}),
 	)
 	if err != nil {

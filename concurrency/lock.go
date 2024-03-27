@@ -13,17 +13,13 @@ type Lock struct {
 	parent    string
 	nodeID    string
 	onGranted func(sess *curator.Session)
-
-	cur *curator.Curator
 }
 
-func NewLock(parent string, nodeID string, onGranted func(sess *curator.Session)) *Lock {
+func NewLock(parent string, nodeID string) *Lock {
 	e := &Lock{
-		nodeID:    nodeID,
-		parent:    parent,
-		onGranted: onGranted,
+		nodeID: nodeID,
+		parent: parent,
 	}
-	e.cur = curator.New(e.initFunc)
 	return e
 }
 
@@ -34,6 +30,11 @@ const (
 	lockStatusNeedCreate
 	lockStatusGranted
 )
+
+func (e *Lock) Start(sess *curator.Session, next func(sess *curator.Session)) {
+	e.onGranted = next
+	e.initFunc(sess)
+}
 
 func (e *Lock) initFunc(sess *curator.Session) {
 	sess.Run(func(client curator.Client) {
@@ -160,8 +161,4 @@ func (e *Lock) watchPreviousNode(sess *curator.Session, prevNode string) {
 			}
 		})
 	})
-}
-
-func (e *Lock) Curator() *curator.Curator {
-	return e.cur
 }

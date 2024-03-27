@@ -39,13 +39,14 @@ func initStore(parent string) *curator.FakeZookeeper {
 
 func TestLock_Single_Client__Success(t *testing.T) {
 	steps := make([]string, 0)
-	l := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock-granted")
-	})
+	l := NewLock("/workers", "node01")
 
 	store := initStore("/workers")
 
-	startLock(l, store, client1)
+	onGranted := func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	}
+	startLock(l, store, client1, onGranted)
 
 	store.Begin(client1)
 	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
@@ -66,24 +67,32 @@ func TestLock_Single_Client__Success(t *testing.T) {
 	}, steps)
 }
 
-func startLock(l *Lock, store *curator.FakeZookeeper, client curator.FakeClientID) {
+func startLock(
+	l *Lock, store *curator.FakeZookeeper,
+	client curator.FakeClientID, onGranted func(sess *curator.Session),
+) {
 	c := curator.NewFakeClientFactory(store, client)
-	c.Start(l.Curator())
+	c.Start(curator.NewChain(
+		l.Start,
+		func(sess *curator.Session, next func(sess *curator.Session)) {
+			onGranted(sess)
+		},
+	))
 }
 
 func TestLock_Two_Clients__Concurrent(t *testing.T) {
 	steps := make([]string, 0)
-	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock01-granted")
-	})
-	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
-		steps = append(steps, "lock02-granted")
-	})
+	l1 := NewLock("/workers", "node01")
+	l2 := NewLock("/workers", "node02")
 
 	store := initStore("/workers")
 
-	startLock(l1, store, client1)
-	startLock(l2, store, client2)
+	startLock(l1, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	startLock(l2, store, client2, func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
 
 	store.Begin(client1)
 	store.Begin(client2)
@@ -122,18 +131,19 @@ func TestLock_Two_Clients__Concurrent(t *testing.T) {
 }
 
 func TestLock_Two_Clients__First_Granted__Then_Second_Start(t *testing.T) {
-	steps := make([]string, 0)
-	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock01-granted")
-	})
-	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
-		steps = append(steps, "lock02-granted")
-	})
+	l1 := NewLock("/workers", "node01")
+	l2 := NewLock("/workers", "node02")
 
 	store := initStore("/workers")
 
-	startLock(l1, store, client1)
-	startLock(l2, store, client2)
+	steps := make([]string, 0)
+
+	startLock(l1, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	startLock(l2, store, client2, func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
 
 	store.Begin(client1)
 	store.Begin(client2)
@@ -161,18 +171,18 @@ func TestLock_Two_Clients__First_Granted__Then_Second_Start(t *testing.T) {
 }
 
 func TestLock_Two_Clients__First_Granted__Then_Expired_Right_Before_Client2_GetData(t *testing.T) {
-	steps := make([]string, 0)
-	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock01-granted")
-	})
-	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
-		steps = append(steps, "lock02-granted")
-	})
+	l1 := NewLock("/workers", "node01")
+	l2 := NewLock("/workers", "node02")
 
 	store := initStore("/workers")
 
-	startLock(l1, store, client1)
-	startLock(l2, store, client2)
+	steps := make([]string, 0)
+	startLock(l1, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	startLock(l2, store, client2, func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
 
 	store.Begin(client1)
 	store.Begin(client2)
@@ -206,13 +216,13 @@ func TestLock_Two_Clients__First_Granted__Then_Expired_Right_Before_Client2_GetD
 
 func TestLock_Single_Client__Children_Error(t *testing.T) {
 	steps := make([]string, 0)
-	l := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock-granted")
-	})
+	l := NewLock("/workers", "node01")
 
 	store := initStore("/workers")
 
-	startLock(l, store, client1)
+	startLock(l, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
 
 	store.Begin(client1)
 	assert.Equal(t, []string{"children"}, store.PendingCalls(client1))
@@ -234,13 +244,13 @@ func TestLock_Single_Client__Children_Error(t *testing.T) {
 
 func TestLock_Single_Client__Create_Conn_Error(t *testing.T) {
 	steps := make([]string, 0)
-	l := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock-granted")
-	})
+	l := NewLock("/workers", "node01")
 
 	store := initStore("/workers")
 
-	startLock(l, store, client1)
+	startLock(l, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
 
 	store.Begin(client1)
 	store.ChildrenApply(client1)
@@ -254,13 +264,13 @@ func TestLock_Single_Client__Create_Conn_Error(t *testing.T) {
 
 func TestLock_Single_Client__Create_Apply_Conn_Error(t *testing.T) {
 	steps := make([]string, 0)
-	l := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock-granted")
-	})
+	l := NewLock("/workers", "node01")
 
 	store := initStore("/workers")
 
-	startLock(l, store, client1)
+	startLock(l, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock-granted")
+	})
 
 	store.Begin(client1)
 	store.ChildrenApply(client1)
@@ -281,17 +291,17 @@ func TestLock_Single_Client__Create_Apply_Conn_Error(t *testing.T) {
 
 func TestLock_Two_Clients__Second_Get_Watch_Error(t *testing.T) {
 	steps := make([]string, 0)
-	l1 := NewLock("/workers", "node01", func(sess *curator.Session) {
-		steps = append(steps, "lock01-granted")
-	})
-	l2 := NewLock("/workers", "node02", func(sess *curator.Session) {
-		steps = append(steps, "lock02-granted")
-	})
+	l1 := NewLock("/workers", "node01")
+	l2 := NewLock("/workers", "node02")
 
 	store := initStore("/workers")
 
-	startLock(l1, store, client1)
-	startLock(l2, store, client2)
+	startLock(l1, store, client1, func(sess *curator.Session) {
+		steps = append(steps, "lock01-granted")
+	})
+	startLock(l2, store, client2, func(sess *curator.Session) {
+		steps = append(steps, "lock02-granted")
+	})
 
 	store.Begin(client1)
 	store.Begin(client2)

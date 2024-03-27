@@ -7,6 +7,12 @@ type Curator struct {
 	sess   *Session
 }
 
+type SessionRunner interface {
+	Begin(client Client)
+	Retry()
+	End()
+}
+
 type Session struct {
 	retryFuncs []func(sess *Session)
 	state      *Curator
@@ -20,6 +26,24 @@ func New(
 	}
 }
 
+type SessionCallback func(sess *Session, next func(sess *Session))
+
+func NewChain(
+	initFuncList ...SessionCallback,
+) *Curator {
+	next := func(sess *Session) {}
+	for i := len(initFuncList) - 1; i >= 0; i-- {
+		initFn := initFuncList[i]
+		oldNext := next
+		next = func(sess *Session) {
+			initFn(sess, oldNext)
+		}
+	}
+	return &Curator{
+		initFunc: next,
+	}
+}
+
 func (c *Curator) Begin(client Client) {
 	c.client = client
 	c.sess = &Session{
@@ -29,6 +53,9 @@ func (c *Curator) Begin(client Client) {
 }
 
 func (c *Curator) Retry() {
+	if c.sess == nil {
+		return
+	}
 	for _, cb := range c.sess.retryFuncs {
 		cb(c.sess)
 	}

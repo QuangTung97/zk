@@ -34,7 +34,7 @@ type ZNode struct {
 
 type FakeZookeeper struct {
 	States   map[FakeClientID]*FakeSessionState
-	Sessions map[FakeClientID][]SessionCallback
+	Sessions map[FakeClientID]SessionRunner
 	Clients  map[FakeClientID]Client
 	Pending  map[FakeClientID][]any
 
@@ -48,7 +48,7 @@ type FakeZookeeper struct {
 func NewFakeZookeeper() *FakeZookeeper {
 	return &FakeZookeeper{
 		States:   map[FakeClientID]*FakeSessionState{},
-		Sessions: map[FakeClientID][]SessionCallback{},
+		Sessions: map[FakeClientID]SessionRunner{},
 		Clients:  map[FakeClientID]Client{},
 		Pending:  map[FakeClientID][]any{},
 
@@ -76,8 +76,8 @@ func NewFakeClientFactory(store *FakeZookeeper, clientID FakeClientID) ClientFac
 	}
 }
 
-func (c *fakeClientFactory) Start(callbacks ...SessionCallback) {
-	c.store.Sessions[c.clientID] = callbacks
+func (c *fakeClientFactory) Start(runner SessionRunner) {
+	c.store.Sessions[c.clientID] = runner
 	c.store.Clients[c.clientID] = &fakeClient{
 		store:    c.store,
 		clientID: c.clientID,
@@ -96,10 +96,8 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	s.NextSessionID++
 	state.SessionID = s.NextSessionID
 	client := s.Clients[clientID]
-	callbacks := s.Sessions[clientID]
-	for _, cb := range callbacks {
-		cb.Begin(client)
-	}
+	runner := s.Sessions[clientID]
+	runner.Begin(client)
 }
 
 func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID) {
@@ -133,10 +131,8 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	s.Zxid++
 	s.deleteNodesRecursiveForSessionID(s.Root, "", sessionID)
 
-	callbacks := s.Sessions[clientID]
-	for _, cb := range callbacks {
-		cb.End()
-	}
+	runner := s.Sessions[clientID]
+	runner.End()
 }
 
 func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, path string, sessionID int64) {
@@ -417,10 +413,8 @@ func (s *FakeZookeeper) notifyDataWatches(node *ZNode, path string, eventType zk
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 
-	sessList := s.Sessions[clientID]
-	for _, sess := range sessList {
-		sess.Retry()
-	}
+	runner := s.Sessions[clientID]
+	runner.Retry()
 }
 
 type fakeClient struct {

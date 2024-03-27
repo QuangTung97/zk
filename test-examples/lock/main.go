@@ -25,11 +25,16 @@ func main() {
 	nodeID := hex.EncodeToString(data[:])
 	fmt.Println("NODEID:", nodeID)
 
-	l := concurrency.NewLock("/workers", nodeID, func(sess *curator.Session) {
-		fmt.Println("Lock Granted:", nodeID)
-	})
+	l := concurrency.NewLock("/workers", nodeID)
 
-	factory.Start(l.Curator())
+	onGranted := func(sess *curator.Session, next func(sess *curator.Session)) {
+		fmt.Println("Lock Granted:", nodeID)
+	}
+
+	factory.Start(curator.NewChain(
+		l.Start,
+		onGranted,
+	))
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
