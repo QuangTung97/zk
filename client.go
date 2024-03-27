@@ -198,7 +198,7 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 
 		logger: &defaultLoggerImpl{},
 
-		dialRetryDuration: 2 * time.Second,
+		dialRetryDuration: 2 * connectTimeout,
 
 		state:  StateDisconnected,
 		passwd: emptyPassword,
@@ -301,6 +301,8 @@ func (c *Client) tryToConnect() tcpConn {
 	}
 }
 
+const connectTimeout = 1 * time.Second
+
 func (c *Client) doConnect() (tcpConn, bool) {
 	c.mut.Lock()
 	if c.state == StateHasSession {
@@ -313,7 +315,7 @@ func (c *Client) doConnect() (tcpConn, bool) {
 	c.logger.Infof("Connecting to address: '%s'", c.servers[0])
 
 	// TODO Server Selector
-	netConn, err := net.DialTimeout("tcp", c.servers[0], c.recvTimeout)
+	netConn, err := net.DialTimeout("tcp", c.servers[0], connectTimeout)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
