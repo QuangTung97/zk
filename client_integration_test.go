@@ -689,6 +689,58 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 		}, errors)
 	})
 
+	t.Run("create node with invalid flags", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral|8,
+			WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create",
+		}, steps)
+
+		assert.Equal(t, []error{
+			ErrBadArguments,
+		}, errors)
+	})
+
+	t.Run("create node with invalid acl", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+
+		c.Create(
+			"/workers01", []byte("data01"), FlagEphemeral,
+			nil,
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				errors = append(errors, err)
+			},
+		)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create",
+		}, steps)
+
+		assert.Equal(t, []error{
+			ErrInvalidACL,
+		}, errors)
+	})
+
 	t.Run("create children of non-existed parent node", func(t *testing.T) {
 		c := mustNewClient(t)
 

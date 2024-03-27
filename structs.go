@@ -174,10 +174,6 @@ type createResponse pathResponse
 type DeleteRequest PathVersionRequest
 type deleteResponse struct{}
 
-type errorResponse struct {
-	Err int32
-}
-
 type existsRequest pathWatchRequest
 type existsResponse statResponse
 type getAclRequest pathRequest
@@ -207,12 +203,6 @@ type getDataResponse struct {
 	Stat Stat
 }
 
-type getMaxChildrenRequest pathRequest
-
-type getMaxChildrenResponse struct {
-	Max int32
-}
-
 type getSaslRequest struct {
 	Token []byte
 }
@@ -235,11 +225,6 @@ type SetDataRequest struct {
 }
 
 type setDataResponse statResponse
-
-type setMaxChildren struct {
-	Path string
-	Max  int32
-}
 
 type setSaslRequest struct {
 	Token string

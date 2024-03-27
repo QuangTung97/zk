@@ -116,7 +116,6 @@ var (
 	ErrNotEmpty                = errors.New("zk: node has children")
 	ErrSessionExpired          = errors.New("zk: session has been expired by the server")
 	ErrInvalidACL              = errors.New("zk: invalid ACL specified")
-	ErrInvalidFlags            = errors.New("zk: invalid flags specified")
 	ErrAuthFailed              = errors.New("zk: client authentication failed")
 	ErrClosing                 = errors.New("zk: zookeeper is closing")
 	ErrNothing                 = errors.New("zk: no server responses to process")
