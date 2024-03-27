@@ -880,6 +880,37 @@ func TestFakeClient_Set_Validate_Error(t *testing.T) {
 	})
 }
 
+func TestFakeClient_Print_Data(t *testing.T) {
+	c := newFakeClientTest()
+
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/node01", nil, 0, func(resp zk.CreateResponse, err error) {})
+			client.Create("/node02", nil, 0, func(resp zk.CreateResponse, err error) {})
+			client.Create("/node03", []byte("data01"), 0, func(resp zk.CreateResponse, err error) {})
+			client.Create("/node01/child01", []byte("data02"), 0, func(resp zk.CreateResponse, err error) {})
+			client.Create("/node01/child02", nil, 0, func(resp zk.CreateResponse, err error) {})
+			client.Create("/node03/child03", []byte("data03"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {},
+			)
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	c.store.PrintData()
+}
+
 func TestComputePathNodes(t *testing.T) {
 	assert.Equal(t, []string{
 		"/", "workers",

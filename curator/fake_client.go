@@ -219,6 +219,30 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 	}
 }
 
+func (s *FakeZookeeper) PrintData() {
+	s.printDataRecur(s.Root, "")
+}
+
+func (s *FakeZookeeper) printDataRecur(node *ZNode, space string) {
+	name := "|-" + node.Name
+	if node == s.Root {
+		name = "/"
+	}
+
+	if node.Flags&zk.FlagEphemeral > 0 {
+		name += " [E]"
+	}
+
+	if len(node.Data) > 0 {
+		fmt.Printf("%s%s => %s\n", space, name, string(node.Data))
+	} else {
+		fmt.Printf("%s%s\n", space, name)
+	}
+	for _, child := range node.Children {
+		s.printDataRecur(child, space+"  ")
+	}
+}
+
 func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 	values := make([]string, 0)
 	for _, input := range s.Pending[clientID] {
