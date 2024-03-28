@@ -696,7 +696,7 @@ func (c *Client) enqueueRequestWithWatcher(
 	defer c.mut.Unlock()
 
 	if c.sendShutdown {
-		c.logger.Errorf("Zookeeper client must not be accessed after Close()")
+		c.logger.Infof("Zookeeper client being accessed after Close()")
 		return
 	}
 
