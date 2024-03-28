@@ -314,14 +314,6 @@ func (c *Client) doConnect() connectOutput {
 		}
 	}
 
-	if c.state == StateHasSession {
-		conn := c.conn
-		c.mut.Unlock()
-		return connectOutput{
-			conn: conn,
-		}
-	}
-
 	c.state = StateConnecting
 	c.mut.Unlock()
 

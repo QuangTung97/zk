@@ -1799,3 +1799,18 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 
 	assert.Equal(t, 1, retryConnectCount)
 }
+
+func TestClientIntegration_Use_After_Close(t *testing.T) {
+	t.Run("get", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		c.Close()
+
+		var calls int
+		c.Get("/workers", func(resp GetResponse, err error) {
+			calls++
+		})
+		assert.Equal(t, 0, calls)
+		assert.Equal(t, 0, len(c.sendQueue))
+	})
+}
