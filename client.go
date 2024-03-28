@@ -278,6 +278,7 @@ func (c *Client) tryToConnect() (tcpConn, bool) {
 	for {
 		output := c.doConnect()
 		if output.closed {
+			c.notifyHandleEventShutdown()
 			c.disconnectAndCloseWhenShutdown()
 			return nil, false
 		}
@@ -299,6 +300,8 @@ type connectOutput struct {
 }
 
 func (c *Client) notifyHandleEventShutdown() {
+	c.mut.Lock()
+	defer c.mut.Unlock()
 	c.handleShutdown = true
 	c.handleCond.Signal()
 }
@@ -307,7 +310,6 @@ func (c *Client) doConnect() connectOutput {
 	c.mut.Lock()
 
 	if c.sendShutdown {
-		c.notifyHandleEventShutdown()
 		c.mut.Unlock()
 		return connectOutput{
 			closed: true,
@@ -355,15 +357,9 @@ func (c *Client) doConnect() connectOutput {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if c.sendShutdown {
-		c.notifyHandleEventShutdown()
-		return connectOutput{
-			closed: true,
-		}
-	}
-
 	return connectOutput{
-		conn: conn,
+		conn:   conn,
+		closed: c.sendShutdown,
 	}
 }
 
