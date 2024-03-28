@@ -1734,6 +1734,10 @@ func (*testLogger) Warnf(format string, args ...any) {
 	log.Printf("[TEST] [WARN] [ZK] "+format, args...)
 }
 
+func (*testLogger) Errorf(format string, args ...any) {
+	log.Printf("[TEST] [ERROR] [ZK] "+format, args...)
+}
+
 func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 	retryConnectCount := 0
 

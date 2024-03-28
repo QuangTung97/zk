@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"slices"
 	"sync"
@@ -709,7 +708,7 @@ func (c *Client) enqueueRequestWithWatcher(
 	defer c.mut.Unlock()
 
 	if c.sendShutdown {
-		log.Println("[ERROR] Zookeeper Client must not be accessed after Close")
+		c.logger.Errorf("Zookeeper client must not be accessed after Close()")
 		return
 	}
 
@@ -942,7 +941,7 @@ func (c *Client) readSingleData(conn tcpConn) connIOOutput {
 	}
 
 	if res.Xid < 0 {
-		log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
+		c.logger.Warnf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
 		return connNormal()
 	}
 
@@ -959,7 +958,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	}
 
 	if !ok {
-		log.Printf("[ERROR] Response for unknown request with xid %d", res.Xid)
+		c.logger.Warnf("Response for unknown request with xid %d", res.Xid)
 		return connNormal()
 	}
 
