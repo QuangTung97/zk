@@ -67,9 +67,9 @@ func (c *tcpConnTest) closeSession(client *Client) {
 	)
 
 	reqs, _ := client.getFromSendQueue()
-	err := client.sendData(c, reqs[0])
-	if err != nil {
-		panic(err)
+	output := client.sendData(c, reqs[0])
+	if output.err != nil {
+		panic(output.err)
 	}
 
 	client.readSingleData(c)

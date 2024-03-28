@@ -413,9 +413,8 @@ func (c *Client) runSender(conn tcpConn) {
 		}
 
 		for _, req := range requests {
-			err := c.sendData(conn, req)
-			if err != nil {
-				c.disconnectAndClose()
+			output := c.sendData(conn, req)
+			if c.connectionRunnerStopped(output) {
 				return
 			}
 		}
@@ -428,7 +427,7 @@ func (c *Client) connectionRunnerStopped(output connIOOutput) bool {
 		return true
 	}
 	if output.broken {
-		c.disconnectAndClose()
+		c.disconnectAndClose(output.err)
 		return true
 	}
 	return false
@@ -796,10 +795,10 @@ func (c *Client) appendHandleQueueError(
 	}, err)
 }
 
-func (c *Client) disconnectAndClose() {
+func (c *Client) disconnectAndClose(err error) {
 	conn, ok := c.disconnect()
 	if ok {
-		c.logger.Warnf("Close connection")
+		c.logger.Warnf("Close connection with error: %v", err)
 		_ = conn.Close()
 	}
 }

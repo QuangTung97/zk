@@ -340,7 +340,7 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, 0, len(c.client.handleQueue))
 
 		// Do disconnect
-		c.client.disconnectAndClose()
+		c.client.disconnectAndClose(nil)
 
 		// Check all queues after disconnect
 		assert.Equal(t, 0, len(c.client.sendQueue))
@@ -408,7 +408,7 @@ func TestClient_Authenticate(t *testing.T) {
 		c.addToWatchMap()
 
 		// Do disconnect
-		c.client.disconnectAndClose()
+		c.client.disconnectAndClose(nil)
 
 		resp := connectResponse{
 			TimeOut:   12000,
@@ -496,7 +496,7 @@ func TestClient_Authenticate(t *testing.T) {
 		}, c.client.creds)
 
 		// disconnect
-		c.client.disconnectAndClose()
+		c.client.disconnectAndClose(nil)
 
 		resp := connectResponse{
 			TimeOut:   12000,
@@ -588,7 +588,7 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 		assert.Equal(t, 0, len(c.client.handleQueue))
 
 		// Do disconnect
-		c.client.disconnectAndClose()
+		c.client.disconnectAndClose(nil)
 
 		// Check all queues after disconnect
 		assert.Equal(t, 0, len(c.client.sendQueue))
@@ -626,7 +626,7 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 		c.client.state = StateConnecting
 		c.client.conn = nil
 
-		c.client.disconnectAndClose()
+		c.client.disconnectAndClose(nil)
 
 		assert.Equal(t, 0, conn.closeCalls)
 		assert.Equal(t, StateConnecting, c.client.state)
