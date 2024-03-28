@@ -340,7 +340,7 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, 0, len(c.client.handleQueue))
 
 		// Do disconnect
-		c.client.disconnectAndClose(conn)
+		c.client.disconnectAndClose()
 
 		// Check all queues after disconnect
 		assert.Equal(t, 0, len(c.client.sendQueue))
@@ -408,7 +408,7 @@ func TestClient_Authenticate(t *testing.T) {
 		c.addToWatchMap()
 
 		// Do disconnect
-		c.client.disconnectAndClose(conn)
+		c.client.disconnectAndClose()
 
 		resp := connectResponse{
 			TimeOut:   12000,
@@ -496,7 +496,7 @@ func TestClient_Authenticate(t *testing.T) {
 		}, c.client.creds)
 
 		// disconnect
-		c.client.disconnectAndClose(conn)
+		c.client.disconnectAndClose()
 
 		resp := connectResponse{
 			TimeOut:   12000,
@@ -588,7 +588,7 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 		assert.Equal(t, 0, len(c.client.handleQueue))
 
 		// Do disconnect
-		c.client.disconnectAndClose(conn)
+		c.client.disconnectAndClose()
 
 		// Check all queues after disconnect
 		assert.Equal(t, 0, len(c.client.sendQueue))
@@ -604,7 +604,6 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 		assert.Equal(t, 1, conn.closeCalls)
 		assert.Nil(t, c.client.conn)
 		assert.Equal(t, StateDisconnected, c.client.state)
-		assert.Equal(t, 1, c.client.sendSema)
 
 		// DO call handle
 		assert.Equal(t, 0, len(getErrors))
@@ -614,25 +613,6 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 			ErrConnectionClosed,
 			ErrConnectionClosed,
 		}, getErrors)
-	})
-
-	t.Run("disconnect connection mismatch", func(t *testing.T) {
-		c := newClientTest(t)
-
-		conn := &connMock{}
-		conn2 := &connMock{}
-
-		c.client.sessionID = 3400
-		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
-		c.client.state = StateHasSession
-		c.client.conn = conn
-
-		c.client.disconnectAndClose(conn2)
-
-		assert.Equal(t, 0, conn.closeCalls)
-		assert.Equal(t, 0, conn2.closeCalls)
-		assert.Equal(t, StateHasSession, c.client.state)
 	})
 
 	t.Run("connection is connecting", func(t *testing.T) {
@@ -646,24 +626,10 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 		c.client.state = StateConnecting
 		c.client.conn = nil
 
-		c.client.disconnectAndClose(conn)
+		c.client.disconnectAndClose()
 
 		assert.Equal(t, 0, conn.closeCalls)
 		assert.Equal(t, StateConnecting, c.client.state)
-	})
-
-	t.Run("panics with conn is nil", func(t *testing.T) {
-		c := newClientTest(t)
-
-		c.client.sessionID = 3400
-		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
-		c.client.state = StateConnecting
-		c.client.conn = nil
-
-		assert.PanicsWithValue(t, "conn can not be nil", func() {
-			c.client.disconnectAndClose(nil)
-		})
 	})
 }
 

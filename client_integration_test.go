@@ -1769,23 +1769,22 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 
 	fmt.Println("=========================")
 
-	conn, ok := c2.doConnect()
-	assert.Equal(t, true, ok)
+	connOutput := c2.doConnect()
+	assert.Equal(t, false, connOutput.closed)
+	assert.Equal(t, false, connOutput.needRetry)
+	conn := connOutput.conn
 	assert.NotNil(t, conn)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c2.runReceiver()
+		c2.runReceiver(conn)
 	}()
 
 	time.Sleep(300 * time.Millisecond)
 
-	c2.mut.Lock()
-	c2.recvShutdown = true
-	c2.recvCond.Signal()
-	c2.mut.Unlock()
+	_ = conn.Close()
 
 	wg.Wait()
 	if c2.conn != nil {

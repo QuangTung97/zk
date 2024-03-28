@@ -18,16 +18,11 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 		return nil, err
 	}
 
-	c.wg.Add(4)
+	c.wg.Add(3)
 
 	go func() {
 		defer c.wg.Done()
-		c.runSender()
-	}()
-
-	go func() {
-		defer c.wg.Done()
-		c.runReceiver()
+		c.connectAndRunTCPHandlers()
 	}()
 
 	go func() {
@@ -80,11 +75,8 @@ type Client struct {
 	sendQueue    []clientRequest
 	sendCond     *sync.Cond
 	sendShutdown bool
-	sendSema     int
 
-	recvMap      map[int32]clientRequest
-	recvCond     *sync.Cond
-	recvShutdown bool
+	recvMap map[int32]clientRequest
 
 	handleQueue    []handleEvent
 	handleCond     *sync.Cond
@@ -216,7 +208,6 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 	}
 
 	c.sendCond = sync.NewCond(&c.mut)
-	c.recvCond = sync.NewCond(&c.mut)
 	c.handleCond = sync.NewCond(&c.mut)
 
 	c.setTimeouts(int32(sessionTimeout / time.Millisecond))
@@ -229,6 +220,10 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 	defer c.mut.Unlock()
 
 	for {
+		if c.state != StateHasSession {
+			return nil, false
+		}
+
 		if len(c.sendQueue) > 0 {
 			requests := c.sendQueue
 			for _, req := range requests {
@@ -241,14 +236,7 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 			return requests, true
 		}
 
-		if c.sendSema > 0 {
-			c.sendSema = 0
-			return nil, true
-		}
-
 		if c.sendShutdown {
-			c.recvShutdown = true
-			c.recvCond.Signal()
 			return nil, false
 		}
 
@@ -280,22 +268,24 @@ func (c *tcpConnImpl) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) tryToConnect() tcpConn {
+func (c *Client) disconnectAndCloseWhenShutdown() {
+	conn, ok := c.disconnect()
+	if ok {
+		_ = conn.Close()
+	}
+}
+
+func (c *Client) tryToConnect() (tcpConn, bool) {
 	for {
-		conn, ok := c.doConnect()
-		if ok {
-			return conn
+		output := c.doConnect()
+		if output.closed {
+			c.disconnectAndCloseWhenShutdown()
+			return nil, false
 		}
 
-		c.mut.Lock()
-		shutdown := c.sendShutdown
-		if shutdown {
-			c.recvShutdown = true
-			c.recvCond.Signal()
-			c.mut.Unlock()
-			return nil
+		if !output.needRetry {
+			return output.conn, true
 		}
-		c.mut.Unlock()
 
 		time.Sleep(c.dialRetryDuration)
 	}
@@ -303,12 +293,36 @@ func (c *Client) tryToConnect() tcpConn {
 
 const connectTimeout = 1 * time.Second
 
-func (c *Client) doConnect() (tcpConn, bool) {
+type connectOutput struct {
+	conn      tcpConn
+	closed    bool
+	needRetry bool
+}
+
+func (c *Client) notifyHandleEventShutdown() {
+	c.handleShutdown = true
+	c.handleCond.Signal()
+}
+
+func (c *Client) doConnect() connectOutput {
 	c.mut.Lock()
-	if c.state == StateHasSession {
+
+	if c.sendShutdown {
+		c.notifyHandleEventShutdown()
 		c.mut.Unlock()
-		return c.conn, true
+		return connectOutput{
+			closed: true,
+		}
 	}
+
+	if c.state == StateHasSession {
+		conn := c.conn
+		c.mut.Unlock()
+		return connectOutput{
+			conn: conn,
+		}
+	}
+
 	c.state = StateConnecting
 	c.mut.Unlock()
 
@@ -321,7 +335,9 @@ func (c *Client) doConnect() (tcpConn, bool) {
 		c.state = StateDisconnected
 		c.mut.Unlock()
 		c.logger.Warnf("Failed to connect to server: '%s', error: %v", c.servers[0], err)
-		return nil, false
+		return connectOutput{
+			needRetry: true,
+		}
 	}
 
 	c.logger.Infof("Connected to server: '%s'", c.servers[0])
@@ -340,19 +356,52 @@ func (c *Client) doConnect() (tcpConn, bool) {
 		c.state = StateDisconnected
 		c.mut.Unlock()
 		_ = netConn.Close()
-		return nil, false
+		return connectOutput{
+			needRetry: true,
+		}
 	}
 
-	return conn, true
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	if c.sendShutdown {
+		c.notifyHandleEventShutdown()
+		return connectOutput{
+			closed: true,
+		}
+	}
+
+	return connectOutput{
+		conn: conn,
+	}
 }
 
-func (c *Client) runSender() {
+func (c *Client) connectAndRunTCPHandlers() {
 	for {
-		conn := c.tryToConnect()
-		if conn == nil {
+		conn, ok := c.tryToConnect()
+		if !ok {
 			return
 		}
 
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			c.runSender(conn)
+		}()
+
+		go func() {
+			defer wg.Done()
+			c.runReceiver(conn)
+		}()
+
+		wg.Wait()
+	}
+}
+
+func (c *Client) runSender(conn tcpConn) {
+	for {
 		requests, ok := c.getFromSendQueue()
 		if !ok {
 			return
@@ -366,37 +415,31 @@ func (c *Client) runSender() {
 		for _, req := range requests {
 			err := c.sendData(conn, req)
 			if err != nil {
-				c.disconnectAndClose(conn)
-				break
+				c.disconnectAndClose()
+				return
 			}
 		}
 	}
 }
 
-func (c *Client) getConnection() (tcpConn, bool) {
-	c.mut.Lock()
-	defer c.mut.Unlock()
-	for {
-		if c.recvShutdown && len(c.recvMap) == 0 {
-			c.handleShutdown = true
-			c.handleCond.Signal()
-			return nil, false
-		}
-		if c.state == StateHasSession {
-			return c.conn, true
-		}
-		c.recvCond.Wait()
+func (c *Client) connectionRunnerStopped(output connIOOutput) bool {
+	if output.closed {
+		c.disconnectAndCloseWhenShutdown()
+		return true
 	}
+	if output.broken {
+		c.disconnectAndClose()
+		return true
+	}
+	return false
 }
 
-func (c *Client) runReceiver() {
+func (c *Client) runReceiver(conn tcpConn) {
 	for {
-		conn, ok := c.getConnection()
-		if !ok {
+		output := c.readSingleData(conn)
+		if c.connectionRunnerStopped(output) {
 			return
 		}
-
-		c.readSingleData(conn)
 	}
 }
 
@@ -548,8 +591,6 @@ func (c *Client) authenticate(conn tcpConn) error {
 	c.reapplyAllWatches()
 
 	c.mut.Unlock()
-
-	c.recvCond.Signal()
 
 	return nil
 }
@@ -755,16 +796,17 @@ func (c *Client) appendHandleQueueError(
 	}, err)
 }
 
-func (c *Client) disconnectAndClose(conn tcpConn) {
-	ok := c.disconnect(conn)
+func (c *Client) disconnectAndClose() {
+	conn, ok := c.disconnect()
 	if ok {
 		c.logger.Warnf("Close connection")
 		_ = conn.Close()
 	}
 }
 
-func (c *Client) updateStateAndFlushRequests(finalState State) bool {
+func (c *Client) updateStateAndFlushRequests(finalState State) (tcpConn, bool) {
 	c.state = finalState
+	oldConn := c.conn
 	c.conn = nil
 
 	events := make([]handleEvent, 0, len(c.recvMap)+len(c.sendQueue))
@@ -792,44 +834,53 @@ func (c *Client) updateStateAndFlushRequests(finalState State) bool {
 	c.handleQueue = append(c.handleQueue, events...)
 	c.handleCond.Signal()
 
-	c.sendSema++
 	c.sendCond.Signal()
 
-	return true
+	return oldConn, true
 }
 
-func (c *Client) disconnect(conn tcpConn) bool {
-	if conn == nil {
-		panic("conn can not be nil")
-	}
-
+func (c *Client) disconnect() (tcpConn, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
 	if c.state != StateHasSession {
-		return false
-	}
-	if c.conn != conn {
-		return false
+		return nil, false
 	}
 
 	return c.updateStateAndFlushRequests(StateDisconnected)
 }
 
-func (c *Client) sendData(conn tcpConn, req clientRequest) error {
+type connIOOutput struct {
+	closed bool
+	broken bool
+	err    error
+}
+
+func connError(err error) connIOOutput {
+	return connIOOutput{
+		broken: true,
+		err:    err,
+	}
+}
+
+func connNormal() connIOOutput {
+	return connIOOutput{}
+}
+
+func (c *Client) sendData(conn tcpConn, req clientRequest) connIOOutput {
 	header := &requestHeader{Xid: req.xid, Opcode: req.opcode}
 	buf := c.writeCodec.buf[:]
 
 	// encode header
 	n, err := encodePacket(buf[4:], header)
 	if err != nil {
-		return err
+		return connError(err)
 	}
 
 	// encode request object
 	n2, err := encodePacket(buf[4+n:], req.request)
 	if err != nil {
-		return err
+		return connError(err)
 	}
 
 	n += n2
@@ -841,13 +892,13 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) error {
 	_, err = conn.Write(buf[:n+4])
 	_ = conn.SetWriteDeadline(0)
 	if err != nil {
-		return err
+		return connError(err)
 	}
 
-	return nil
+	return connNormal()
 }
 
-func (c *Client) readSingleData(conn tcpConn) {
+func (c *Client) readSingleData(conn tcpConn) connIOOutput {
 	buf := c.readCodec.buf
 
 	c.mut.Lock()
@@ -858,29 +909,25 @@ func (c *Client) readSingleData(conn tcpConn) {
 	_ = conn.SetReadDeadline(recvTimeout)
 	_, err := io.ReadFull(conn, buf[:4])
 	if err != nil {
-		c.disconnectAndClose(conn)
-		return
+		return connError(err)
 	}
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
 	if len(buf) < blen {
-		c.disconnectAndClose(conn)
-		return
+		return connError(nil)
 	}
 
 	_ = conn.SetReadDeadline(recvTimeout)
 	_, err = io.ReadFull(conn, buf[:blen])
 	_ = conn.SetReadDeadline(0)
 	if err != nil {
-		c.disconnectAndClose(conn)
-		return
+		return connError(err)
 	}
 
 	res := responseHeader{}
 	_, err = decodePacket(buf[:16], &res)
 	if err != nil {
-		c.disconnectAndClose(conn)
-		return
+		return connError(err)
 	}
 
 	if res.Zxid > 0 {
@@ -888,23 +935,22 @@ func (c *Client) readSingleData(conn tcpConn) {
 	}
 
 	if res.Xid == watchEventXid {
-		c.handleWatchEvent(conn, buf[:], blen, res)
-		return
+		return c.handleWatchEvent(buf[:], blen, res)
 	}
 	if res.Xid == pingRequestXid {
 		// Ping response. Ignore.
-		return
+		return connNormal()
 	}
 
 	if res.Xid < 0 {
 		log.Printf("Xid < 0 (%d) but not ping or watcher event", res.Xid)
-		return
+		return connNormal()
 	}
 
-	c.handleNormalResponse(res, buf[:], blen)
+	return c.handleNormalResponse(res, buf[:], blen)
 }
 
-func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) {
+func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) connIOOutput {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -915,7 +961,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 
 	if !ok {
 		log.Printf("[ERROR] Response for unknown request with xid %d", res.Xid)
-		return
+		return connNormal()
 	}
 
 	c.mut.Unlock()
@@ -931,6 +977,10 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 
 	c.mut.Lock()
 
+	if req.opcode == opClose {
+		return connIOOutput{closed: true}
+	}
+
 	c.addToWatcherMap(req, err)
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
@@ -939,14 +989,15 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 		err:  err,
 	})
 	c.handleCond.Signal()
+
+	return connNormal()
 }
 
-func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res responseHeader) {
+func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) connIOOutput {
 	watchResp := &watcherEvent{}
 	_, err := decodePacket(buf[16:blen], watchResp)
 	if err != nil {
-		c.disconnectAndClose(conn)
-		return
+		return connError(err)
 	}
 
 	ev := clientWatchEvent{
@@ -983,6 +1034,8 @@ func (c *Client) handleWatchEvent(conn tcpConn, buf []byte, blen int, res respon
 		err: res.Err.toError(),
 	})
 	c.handleCond.Signal()
+
+	return connNormal()
 }
 
 // Close ...
@@ -996,17 +1049,9 @@ func (c *Client) Close() {
 		nil, clientWatchRequest{},
 		false,
 	)
-
-	conn := c.conn
 	c.mut.Unlock()
 
-	c.sendCond.Signal()
-
 	c.wg.Wait()
-
-	if conn != nil {
-		_ = conn.Close()
-	}
 
 	c.logger.Infof("Shutdown completed")
 }
