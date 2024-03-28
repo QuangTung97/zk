@@ -1814,3 +1814,29 @@ func TestClientIntegration_Use_After_Close(t *testing.T) {
 		assert.Equal(t, 0, len(c.sendQueue))
 	})
 }
+
+func TestClientIntegration_Create_And_Watch_For_Its_Own_Deletion(t *testing.T) {
+	t.Run("get", func(t *testing.T) {
+		c := mustNewClient(t)
+
+		var steps []string
+		var errors []error
+		c.Create("/workers", nil, FlagEphemeral, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create")
+				errors = append(errors, err)
+			},
+		)
+		c.Get("/workers", func(resp GetResponse, err error) {
+			steps = append(steps, "get-resp")
+			errors = append(errors, err)
+		}, WithGetWatch(func(ev Event) {
+			steps = append(steps, "get-watch")
+		}))
+
+		c.Close()
+
+		assert.Equal(t, []string{"create", "get-resp", "get-watch"}, steps)
+		assert.Equal(t, []error{nil, nil}, errors)
+	})
+}
