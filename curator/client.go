@@ -32,6 +32,7 @@ type Client interface {
 		path string, data []byte, version int32,
 		callback func(resp zk.SetResponse, err error),
 	)
+	Delete(path string, version int32, callback func(resp zk.DeleteResponse, err error))
 }
 
 type clientImpl struct {
@@ -135,4 +136,11 @@ func (c *clientImpl) Set(
 	callback func(resp zk.SetResponse, err error),
 ) {
 	c.zkClient.Set(path, data, version, callback)
+}
+
+func (c *clientImpl) Delete(
+	path string, version int32,
+	callback func(resp zk.DeleteResponse, err error),
+) {
+	c.zkClient.Delete(path, version, callback)
 }

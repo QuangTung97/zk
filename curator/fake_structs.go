@@ -32,5 +32,11 @@ type SetInput struct {
 	Callback func(resp zk.SetResponse, err error)
 }
 
+type DeleteInput struct {
+	Path     string
+	Version  int32
+	Callback func(resp zk.DeleteResponse, err error)
+}
+
 type RetryInput struct {
 }

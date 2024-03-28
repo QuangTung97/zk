@@ -111,6 +111,10 @@ func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID
 			inputVal.Callback(zk.ChildrenResponse{}, zk.ErrConnectionClosed)
 		case GetInput:
 			inputVal.Callback(zk.GetResponse{}, zk.ErrConnectionClosed)
+		case SetInput:
+			inputVal.Callback(zk.SetResponse{}, zk.ErrConnectionClosed)
+		case DeleteInput:
+			inputVal.Callback(zk.DeleteResponse{}, zk.ErrConnectionClosed)
 		default:
 			panic("unknown input type")
 		}
@@ -263,6 +267,8 @@ func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 			values = append(values, "create")
 		case SetInput:
 			values = append(values, "set")
+		case DeleteInput:
+			values = append(values, "delete")
 		case RetryInput:
 			values = append(values, "retry")
 		default:
@@ -423,6 +429,41 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 	}, nil)
 }
 
+func (s *FakeZookeeper) DeleteApply(clientID FakeClientID) {
+	input := getActionWithType[DeleteInput](s, clientID, "Delete")
+	node := s.findNode(input.Path)
+	if node == nil {
+		input.Callback(zk.DeleteResponse{}, zk.ErrNoNode)
+		return
+	}
+
+	if node.Stat.Version != input.Version {
+		input.Callback(zk.DeleteResponse{}, zk.ErrBadVersion)
+		return
+	}
+
+	s.Zxid++
+
+	nodeName := stdpath.Base(input.Path)
+
+	parent := s.findNode(stdpath.Dir(input.Path))
+	newChildren := make([]*ZNode, 0, len(parent.Children)-1)
+	for _, child := range parent.Children {
+		if child.Name == nodeName {
+			continue
+		}
+		newChildren = append(newChildren, child)
+	}
+	parent.Children = newChildren
+
+	s.notifyChildrenWatches(parent, stdpath.Dir(input.Path))
+	s.notifyDataWatches(node, input.Path, zk.EventNodeDeleted)
+
+	input.Callback(zk.DeleteResponse{
+		Zxid: s.Zxid,
+	}, nil)
+}
+
 func (s *FakeZookeeper) notifyDataWatches(node *ZNode, path string, eventType zk.EventType) {
 	for _, w := range node.DataWatches {
 		w(zk.Event{
@@ -518,6 +559,19 @@ func (c *fakeClient) Set(
 	input := SetInput{
 		Path:     path,
 		Data:     data,
+		Version:  version,
+		Callback: callback,
+	}
+	c.store.appendActions(c.clientID, input)
+}
+
+func (c *fakeClient) Delete(
+	path string, version int32,
+	callback func(resp zk.DeleteResponse, err error),
+) {
+	validatePath(path)
+	input := DeleteInput{
+		Path:     path,
 		Version:  version,
 		Callback: callback,
 	}

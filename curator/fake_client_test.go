@@ -924,3 +924,206 @@ func TestComputePathNodes(t *testing.T) {
 		"/", "data", "tmp01",
 	}, computePathNodes("/data/tmp01"))
 }
+
+func TestFakeClient_Delete_Not_Found(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"delete"}, c.store.PendingCalls(client1))
+
+	c.store.DeleteApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		zk.ErrNoNode,
+	}, errors)
+}
+
+func TestFakeClient_Delete_After_Create(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var deleteResp zk.DeleteResponse
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+				deleteResp = resp
+				errors = append(errors, err)
+			})
+			client.Get("/workers", func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "delete", "get"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.DeleteApply(client1)
+	c.store.GetApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+		zk.ErrNoNode,
+	}, errors)
+
+	assert.Equal(t, zk.DeleteResponse{
+		Zxid: 102,
+	}, deleteResp)
+}
+
+func TestFakeClient_Delete_Conflict_Version(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.Set("/workers", []byte("new-data"), 0, func(resp zk.SetResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.Get("/workers", func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "set", "delete", "get"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.SetApply(client1)
+	c.store.DeleteApply(client1)
+	c.store.GetApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+		zk.ErrBadVersion,
+		nil,
+	}, errors)
+}
+
+func TestFakeClient_Delete_Data_Deleted_Watch(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var watchEvent zk.Event
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.GetW("/workers", func(resp zk.GetResponse, err error) {
+				errors = append(errors, err)
+			}, func(ev zk.Event) {
+				c.addStep("get-watch")
+				watchEvent = ev
+			})
+			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+				c.addStep("delete-resp")
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "get-w", "delete"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.GetApply(client1)
+	c.store.DeleteApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+		nil,
+	}, errors)
+
+	assert.Equal(t, []string{
+		"get-watch",
+		"delete-resp",
+	}, c.steps)
+
+	assert.Equal(t, zk.Event{
+		Type:  zk.EventNodeDeleted,
+		State: 3,
+		Path:  "/workers",
+	}, watchEvent)
+}
+
+func TestFakeClient_Delete_Children_Watch(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	var watchEvent zk.Event
+	initFn := func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			})
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				errors = append(errors, err)
+			}, func(ev zk.Event) {
+				c.addStep("children-watch")
+				watchEvent = ev
+			})
+			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+				c.addStep("delete-resp")
+				errors = append(errors, err)
+			})
+		})
+	}
+	c.startCuratorClient1(initFn)
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"create", "children-w", "delete"}, c.store.PendingCalls(client1))
+
+	c.store.CreateApply(client1)
+	c.store.ChildrenApply(client1)
+	c.store.DeleteApply(client1)
+	assert.Equal(t, []string{}, c.store.PendingCalls(client1))
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+		nil,
+	}, errors)
+
+	assert.Equal(t, []string{
+		"children-watch",
+		"delete-resp",
+	}, c.steps)
+
+	assert.Equal(t, zk.Event{
+		Type:  zk.EventNodeChildrenChanged,
+		State: 3,
+		Path:  "/",
+	}, watchEvent)
+}
