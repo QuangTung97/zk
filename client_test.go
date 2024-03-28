@@ -132,7 +132,7 @@ func TestClient_Authenticate(t *testing.T) {
 		}, c.passwd)
 		assert.Equal(t, 4*time.Second, c.recvTimeout)
 		assert.Equal(t, 2*time.Second, c.pingInterval)
-		assert.Equal(t, int64(0), c.lastZxid.Load())
+		assert.Equal(t, int64(0), c.lastZxid)
 		assert.Equal(t, int32(6000), c.sessionTimeoutMs)
 		assert.Equal(t, int64(0), c.sessionID)
 	})
@@ -187,7 +187,7 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, []byte("new-pass"), c.client.passwd)
 		assert.Equal(t, 8*time.Second, c.client.recvTimeout)
 		assert.Equal(t, 4*time.Second, c.client.pingInterval)
-		assert.Equal(t, int64(0), c.client.lastZxid.Load())
+		assert.Equal(t, int64(0), c.client.lastZxid)
 		assert.Equal(t, int32(12000), c.client.sessionTimeoutMs)
 		assert.Equal(t, int64(3400), c.client.sessionID)
 	})
@@ -196,7 +196,7 @@ func TestClient_Authenticate(t *testing.T) {
 		c := newClientTest(t)
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateDisconnected
 
 		var err error
@@ -220,7 +220,7 @@ func TestClient_Authenticate(t *testing.T) {
 		assert.Equal(t, emptyPassword, c.client.passwd)
 		assert.Equal(t, 4*time.Second, c.client.recvTimeout)
 		assert.Equal(t, 2*time.Second, c.client.pingInterval)
-		assert.Equal(t, int64(0), c.client.lastZxid.Load())
+		assert.Equal(t, int64(0), c.client.lastZxid)
 		assert.Equal(t, int32(6000), c.client.sessionTimeoutMs)
 		assert.Equal(t, int64(0), c.client.sessionID)
 	})
@@ -235,7 +235,7 @@ func TestClient_Authenticate(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateDisconnected
 
 		var err error
@@ -273,7 +273,7 @@ func TestClient_Authenticate(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateHasSession
 
 		c.client.Get(
@@ -318,7 +318,7 @@ func TestClient_Authenticate(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateHasSession
 		c.client.conn = conn
 
@@ -389,7 +389,7 @@ func TestClient_Authenticate(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateHasSession
 		c.client.conn = conn
 
@@ -469,7 +469,7 @@ func TestClient_Authenticate(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateHasSession
 		c.client.conn = conn
 
@@ -551,7 +551,7 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateHasSession
 		c.client.conn = conn
 
@@ -622,7 +622,7 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 
 		c.client.sessionID = 3400
 		c.client.passwd = []byte("some-pass")
-		c.client.lastZxid.Store(8020)
+		c.client.lastZxid = 8020
 		c.client.state = StateConnecting
 		c.client.conn = nil
 
@@ -798,7 +798,7 @@ func TestClient_Ping(t *testing.T) {
 
 	c.client.sessionID = 3400
 	c.client.passwd = []byte("some-pass")
-	c.client.lastZxid.Store(8020)
+	c.client.lastZxid = 8020
 	c.client.state = StateHasSession
 
 	c.client.sendPingRequest()
@@ -819,7 +819,7 @@ func TestClient_Get_After_Expired(t *testing.T) {
 
 	c.client.sessionID = 0
 	c.client.passwd = emptyPassword
-	c.client.lastZxid.Store(0)
+	c.client.lastZxid = 0
 	c.client.state = StateExpired
 
 	var getErr error
@@ -839,7 +839,7 @@ func TestClient_Exists_With_Add_Watch_With_Error(t *testing.T) {
 
 	c.client.sessionID = 1234
 	c.client.passwd = emptyPassword
-	c.client.lastZxid.Store(0)
+	c.client.lastZxid = 0
 	c.client.state = StateHasSession
 
 	var existErr error

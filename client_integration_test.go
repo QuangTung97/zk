@@ -127,7 +127,7 @@ func TestClientIntegration_All_Ephemeral(t *testing.T) {
 			Path: "/workers01",
 		}, createResp)
 
-		assert.Greater(t, c.lastZxid.Load(), int64(0))
+		assert.Greater(t, c.lastZxid, int64(0))
 	})
 
 	t.Run("get children", func(t *testing.T) {
@@ -1755,7 +1755,7 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 	c1.mut.Lock()
 	sessionID := c1.sessionID
 	passwd := c1.passwd
-	lastZxid := c1.lastZxid.Load()
+	lastZxid := c1.lastZxid
 	c1.mut.Unlock()
 
 	c2, err := newClientInternal([]string{"localhost"}, 30*time.Second, WithLogger(&testLogger{}))
@@ -1765,7 +1765,7 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 
 	c2.sessionID = sessionID
 	c2.passwd = passwd
-	c2.lastZxid.Store(lastZxid)
+	c2.lastZxid = lastZxid
 
 	fmt.Println("=========================")
 
