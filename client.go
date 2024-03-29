@@ -268,7 +268,7 @@ func (c *tcpConnImpl) Close() error {
 }
 
 func (c *Client) disconnectAndCloseWhenShutdown() {
-	conn, ok := c.disconnect()
+	conn, ok := c.disconnect(nil)
 	if ok {
 		_ = conn.Close()
 	}
@@ -278,8 +278,8 @@ func (c *Client) tryToConnect() (tcpConn, bool) {
 	for {
 		output := c.doConnect()
 		if output.closed {
-			c.notifyHandleEventShutdown()
 			c.disconnectAndCloseWhenShutdown()
+			c.notifyHandleEventShutdown()
 			return nil, false
 		}
 
@@ -375,19 +375,19 @@ func (c *Client) connectAndRunTCPHandlers() {
 
 		go func() {
 			defer wg.Done()
-			c.runSender(conn)
+			c.runSender(conn, &wg)
 		}()
 
 		go func() {
 			defer wg.Done()
-			c.runReceiver(conn)
+			c.runReceiver(conn, &wg)
 		}()
 
 		wg.Wait()
 	}
 }
 
-func (c *Client) runSender(conn tcpConn) {
+func (c *Client) runSender(conn tcpConn, wg *sync.WaitGroup) {
 	for {
 		requests, ok := c.getFromSendQueue()
 		if !ok {
@@ -401,29 +401,29 @@ func (c *Client) runSender(conn tcpConn) {
 
 		for _, req := range requests {
 			output := c.sendData(conn, req)
-			if c.connectionRunnerStopped(output) {
+			if c.connectionRunnerStopped(output, wg) {
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) connectionRunnerStopped(output connIOOutput) bool {
+func (c *Client) connectionRunnerStopped(output connIOOutput, wg *sync.WaitGroup) bool {
 	if output.closed {
 		c.disconnectAndCloseWhenShutdown()
 		return true
 	}
 	if output.broken {
-		c.disconnectAndClose(output.err)
+		c.disconnectAndClose(output.err, wg)
 		return true
 	}
 	return false
 }
 
-func (c *Client) runReceiver(conn tcpConn) {
+func (c *Client) runReceiver(conn tcpConn, wg *sync.WaitGroup) {
 	for {
 		output := c.readSingleData(conn)
-		if c.connectionRunnerStopped(output) {
+		if c.connectionRunnerStopped(output, wg) {
 			return
 		}
 	}
@@ -782,15 +782,15 @@ func (c *Client) appendHandleQueueError(
 	}, err)
 }
 
-func (c *Client) disconnectAndClose(err error) {
-	conn, ok := c.disconnect()
+func (c *Client) disconnectAndClose(err error, wg *sync.WaitGroup) {
+	conn, ok := c.disconnect(wg)
 	if ok {
 		c.logger.Warnf("Close connection with error: %v", err)
 		_ = conn.Close()
 	}
 }
 
-func (c *Client) updateStateAndFlushRequests(finalState State) (tcpConn, bool) {
+func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGroup) (tcpConn, bool) {
 	c.state = finalState
 	oldConn := c.conn
 	c.conn = nil
@@ -818,14 +818,27 @@ func (c *Client) updateStateAndFlushRequests(finalState State) (tcpConn, bool) {
 	})
 
 	c.handleQueue = append(c.handleQueue, events...)
-	c.handleCond.Signal()
 
-	c.sendCond.Signal()
+	if wg != nil {
+		wg.Add(1)
+		c.handleQueue = append(c.handleQueue, handleEvent{
+			req: clientRequest{
+				opcode:   opWatcherEvent,
+				response: nil,
+				callback: func(res any, zxid int64, err error) {
+					wg.Done()
+				},
+			},
+		})
+	}
+
+	c.handleCond.Signal()
+	c.sendCond.Signal() // notify when state is changed
 
 	return oldConn, true
 }
 
-func (c *Client) disconnect() (tcpConn, bool) {
+func (c *Client) disconnect(wg *sync.WaitGroup) (tcpConn, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -833,7 +846,7 @@ func (c *Client) disconnect() (tcpConn, bool) {
 		return nil, false
 	}
 
-	return c.updateStateAndFlushRequests(StateDisconnected)
+	return c.updateStateAndFlushRequests(StateDisconnected, wg)
 }
 
 type connIOOutput struct {

@@ -1227,6 +1227,52 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 
 		assert.Equal(t, 1, reconnectCalls)
 	})
+
+	t.Run("callback with sleep, then reconnected, calls in the callback should returns error", func(t *testing.T) {
+		var reconnectCalls int
+		c := mustNewClient(t,
+			WithDialRetryDuration(100*time.Millisecond),
+			WithReconnectingCallback(func(c *Client) {
+				reconnectCalls++
+			}),
+		)
+
+		pathVal := "/workers01"
+		var steps []string
+		var errors []error
+
+		c.Create(pathVal,
+			[]byte("data01"), 0, WorldACL(PermAll),
+			func(resp CreateResponse, err error) {
+				steps = append(steps, "create-resp")
+				errors = append(errors, err)
+
+				time.Sleep(600 * time.Millisecond)
+
+				c.Get(pathVal, func(resp GetResponse, err error) {
+					steps = append(steps, "get-resp")
+					errors = append(errors, err)
+				})
+			},
+		)
+
+		time.Sleep(300 * time.Millisecond)
+		_ = c.conn.Close()
+		time.Sleep(600 * time.Millisecond)
+
+		c.Close()
+
+		assert.Equal(t, []string{
+			"create-resp",
+			"get-resp",
+		}, steps)
+		assert.Equal(t, []error{
+			nil,
+			ErrConnectionClosed,
+		}, errors)
+
+		assert.Equal(t, 1, reconnectCalls)
+	})
 }
 
 func TestClientInternal_WithSessionExpired(t *testing.T) {
@@ -1783,7 +1829,7 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c2.runReceiver(conn)
+		c2.runReceiver(conn, nil)
 	}()
 
 	time.Sleep(300 * time.Millisecond)
