@@ -39,10 +39,9 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 
 // Client ...
 type Client struct {
-	servers []string // Deprecated
-
 	logger Logger
 
+	dialFunc          func(addr string, timeout time.Duration) (NetworkConn, error)
 	dialRetryDuration time.Duration
 
 	writeCodec    codecBuffer // not need to lock
@@ -87,7 +86,7 @@ type Client struct {
 	handleCond     *sync.Cond
 	handleShutdown bool
 
-	conn tcpConn
+	conn NetworkConn
 
 	creds    []authCreds
 	watchers map[watchPathType][]func(ev clientWatchEvent)
@@ -130,6 +129,20 @@ func WithDialRetryDuration(d time.Duration) Option {
 	}
 }
 
+func WithServerSelector(selector ServerSelector) Option {
+	return func(c *Client) {
+		c.selector = selector
+	}
+}
+
+func WithDialTimeoutFunc(
+	dialFunc func(addr string, timeout time.Duration) (NetworkConn, error),
+) Option {
+	return func(c *Client) {
+		c.dialFunc = dialFunc
+	}
+}
+
 func WithLogger(l Logger) Option {
 	return func(c *Client) {
 		c.logger = l
@@ -166,7 +179,7 @@ type clientWatchRequest struct {
 	callback func(ev clientWatchEvent)
 }
 
-type tcpConn interface {
+type NetworkConn interface {
 	io.Reader
 	io.Writer
 	io.Closer
@@ -197,6 +210,13 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 
 		selector: NewServerListSelector(time.Now().UnixNano()),
 
+		dialFunc: func(addr string, timeout time.Duration) (NetworkConn, error) {
+			netConn, err := net.DialTimeout("tcp", addr, timeout)
+			if err != nil {
+				return nil, err
+			}
+			return NewTCPConn(netConn), nil
+		},
 		dialRetryDuration: 2 * connectTimeout,
 
 		state:  StateDisconnected,
@@ -253,30 +273,6 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 	}
 }
 
-type tcpConnImpl struct {
-	conn net.Conn
-}
-
-func (c *tcpConnImpl) Write(p []byte) (int, error) {
-	return c.conn.Write(p)
-}
-
-func (c *tcpConnImpl) Read(p []byte) (int, error) {
-	return c.conn.Read(p)
-}
-
-func (c *tcpConnImpl) SetReadDeadline(d time.Duration) error {
-	return c.conn.SetReadDeadline(time.Now().Add(d))
-}
-
-func (c *tcpConnImpl) SetWriteDeadline(d time.Duration) error {
-	return c.conn.SetWriteDeadline(time.Now().Add(d))
-}
-
-func (c *tcpConnImpl) Close() error {
-	return c.conn.Close()
-}
-
 func (c *Client) disconnectAndCloseWhenShutdown() {
 	conn, ok := c.disconnect(nil)
 	if ok {
@@ -284,7 +280,7 @@ func (c *Client) disconnectAndCloseWhenShutdown() {
 	}
 }
 
-func (c *Client) tryToConnect() (tcpConn, bool) {
+func (c *Client) tryToConnect() (NetworkConn, bool) {
 	for {
 		output := c.doConnect()
 		if output.closed {
@@ -297,16 +293,19 @@ func (c *Client) tryToConnect() (tcpConn, bool) {
 			return output.conn, true
 		}
 
-		time.Sleep(c.dialRetryDuration)
+		if output.withSleep {
+			time.Sleep(c.dialRetryDuration)
+		}
 	}
 }
 
 const connectTimeout = 1 * time.Second
 
 type connectOutput struct {
-	conn      tcpConn
+	conn      NetworkConn
 	closed    bool
 	needRetry bool
+	withSleep bool
 }
 
 func (c *Client) notifyHandleEventShutdown() {
@@ -334,8 +333,7 @@ func (c *Client) doConnect() connectOutput {
 
 	c.logger.Infof("Connecting to address: '%s'", serverAddr)
 
-	// TODO Server Selector
-	netConn, err := net.DialTimeout("tcp", serverAddr, connectTimeout)
+	conn, err := c.dialFunc(serverAddr, connectTimeout)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
@@ -343,15 +341,12 @@ func (c *Client) doConnect() connectOutput {
 		c.logger.Warnf("Failed to connect to server: '%s', error: %v", serverAddr, err)
 		return connectOutput{
 			needRetry: true,
+			withSleep: nextOutput.RetryStart,
 		}
 	}
 
 	c.selector.NotifyConnected()
 	c.logger.Infof("Connected to server: '%s'", serverAddr)
-
-	conn := &tcpConnImpl{
-		conn: netConn,
-	}
 
 	c.mut.Lock()
 	c.state = StateConnected
@@ -362,7 +357,8 @@ func (c *Client) doConnect() connectOutput {
 		c.mut.Lock()
 		c.state = StateDisconnected
 		c.mut.Unlock()
-		_ = netConn.Close()
+		_ = conn.Close()
+		c.logger.Warnf("Failed to authenticate to server: '%s', error: %v", serverAddr, err)
 		return connectOutput{
 			needRetry: true,
 		}
@@ -401,7 +397,7 @@ func (c *Client) connectAndRunTCPHandlers() {
 	}
 }
 
-func (c *Client) runSender(conn tcpConn, wg *sync.WaitGroup) {
+func (c *Client) runSender(conn NetworkConn, wg *sync.WaitGroup) {
 	for {
 		requests, ok := c.getFromSendQueue()
 		if !ok {
@@ -434,7 +430,7 @@ func (c *Client) connectionRunnerStopped(output connIOOutput, wg *sync.WaitGroup
 	return false
 }
 
-func (c *Client) runReceiver(conn tcpConn, wg *sync.WaitGroup) {
+func (c *Client) runReceiver(conn NetworkConn, wg *sync.WaitGroup) {
 	for {
 		output := c.readSingleData(conn)
 		if c.connectionRunnerStopped(output, wg) {
@@ -529,7 +525,7 @@ func (c *Client) nextXid() int32 {
 	return int32(c.nextXidValue & 0x7fffffff)
 }
 
-func (c *Client) authenticate(conn tcpConn) error {
+func (c *Client) authenticate(conn NetworkConn) error {
 	req := &connectRequest{
 		ProtocolVersion: protocolVersion,
 		LastZxidSeen:    c.lastZxid,
@@ -806,7 +802,7 @@ func (c *Client) disconnectAndClose(err error, wg *sync.WaitGroup) {
 	}
 }
 
-func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGroup) (tcpConn, bool) {
+func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGroup) (NetworkConn, bool) {
 	c.state = finalState
 	oldConn := c.conn
 	c.conn = nil
@@ -854,7 +850,7 @@ func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGrou
 	return oldConn, true
 }
 
-func (c *Client) disconnect(wg *sync.WaitGroup) (tcpConn, bool) {
+func (c *Client) disconnect(wg *sync.WaitGroup) (NetworkConn, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -882,7 +878,7 @@ func connNormal() connIOOutput {
 	return connIOOutput{}
 }
 
-func (c *Client) sendData(conn tcpConn, req clientRequest) connIOOutput {
+func (c *Client) sendData(conn NetworkConn, req clientRequest) connIOOutput {
 	header := &requestHeader{Xid: req.xid, Opcode: req.opcode}
 	buf := c.writeCodec.buf[:]
 
@@ -913,7 +909,7 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) connIOOutput {
 	return connNormal()
 }
 
-func (c *Client) readSingleData(conn tcpConn) connIOOutput {
+func (c *Client) readSingleData(conn NetworkConn) connIOOutput {
 	buf := c.readCodec.buf
 
 	recvTimeout := c.getRecvTimeout()
