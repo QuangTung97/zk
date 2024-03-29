@@ -130,7 +130,7 @@ func TestClient_Authenticate(t *testing.T) {
 			0, 0, 0, 0,
 			0, 0, 0, 0,
 		}, c.passwd)
-		assert.Equal(t, 4*time.Second, c.recvTimeout)
+		assert.Equal(t, 4*time.Second, c.getRecvTimeout())
 		assert.Equal(t, 2*time.Second, c.pingInterval)
 		assert.Equal(t, int64(0), c.lastZxid)
 		assert.Equal(t, int32(6000), c.sessionTimeoutMs)
@@ -185,7 +185,7 @@ func TestClient_Authenticate(t *testing.T) {
 		// check state
 		assert.Equal(t, StateHasSession, c.client.state)
 		assert.Equal(t, []byte("new-pass"), c.client.passwd)
-		assert.Equal(t, 8*time.Second, c.client.recvTimeout)
+		assert.Equal(t, 8*time.Second, c.client.getRecvTimeout())
 		assert.Equal(t, 4*time.Second, c.client.pingInterval)
 		assert.Equal(t, int64(0), c.client.lastZxid)
 		assert.Equal(t, int32(12000), c.client.sessionTimeoutMs)
@@ -218,7 +218,7 @@ func TestClient_Authenticate(t *testing.T) {
 		// check state
 		assert.Equal(t, StateExpired, c.client.state)
 		assert.Equal(t, emptyPassword, c.client.passwd)
-		assert.Equal(t, 4*time.Second, c.client.recvTimeout)
+		assert.Equal(t, 4*time.Second, c.client.getRecvTimeout())
 		assert.Equal(t, 2*time.Second, c.client.pingInterval)
 		assert.Equal(t, int64(0), c.client.lastZxid)
 		assert.Equal(t, int32(6000), c.client.sessionTimeoutMs)

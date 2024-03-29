@@ -7,6 +7,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func NewClient(servers []string, sessionTimeout time.Duration, options ...Option
 
 // Client ...
 type Client struct {
-	servers []string
+	servers []string // Deprecated
 
 	logger Logger
 
@@ -48,28 +49,33 @@ type Client struct {
 	readCodec     codecBuffer // not need to lock
 	authReadCodec codecBuffer // not need to lock
 
+	selector ServerSelector
+
 	sessEstablishedCallback func(c *Client)
 	sessExpiredCallback     func(c *Client)
 	reconnectingCallback    func(c *Client)
 
+	// =================================
 	// doesn't need to protect by mutex
+	// =================================
 	lastZxid int64
+	passwd   []byte
+
+	sessionTimeoutMs int32
+	sessionID        int64
+
+	recvTimeout  atomic.Int64
+	pingInterval time.Duration
+	// =================================
 
 	// =================================
-	// protect following fields
+	// mutex protect following fields
 	// =================================
 	mut sync.Mutex
 
 	nextXidValue uint32
 
-	passwd       []byte
-	recvTimeout  time.Duration
-	pingInterval time.Duration
-
 	state State
-
-	sessionTimeoutMs int32
-	sessionID        int64
 
 	sendQueue    []clientRequest
 	sendCond     *sync.Cond
@@ -91,6 +97,10 @@ type Client struct {
 
 	pingSignalChan chan struct{}
 	pingCloseChan  chan struct{} // for closing ping loop
+}
+
+func (c *Client) getRecvTimeout() time.Duration {
+	return time.Duration(c.recvTimeout.Load())
 }
 
 // Option ...
@@ -182,12 +192,10 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 		return nil, errors.New("zk: session timeout must not be too small")
 	}
 
-	servers = FormatServers(servers)
-
 	c := &Client{
-		servers: servers,
-
 		logger: &defaultLoggerImpl{},
+
+		selector: NewServerListSelector(time.Now().UnixNano()),
 
 		dialRetryDuration: 2 * connectTimeout,
 
@@ -205,6 +213,8 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 	for _, option := range options {
 		option(c)
 	}
+
+	c.selector.Init(servers)
 
 	c.sendCond = sync.NewCond(&c.mut)
 	c.handleCond = sync.NewCond(&c.mut)
@@ -319,21 +329,25 @@ func (c *Client) doConnect() connectOutput {
 	c.state = StateConnecting
 	c.mut.Unlock()
 
-	c.logger.Infof("Connecting to address: '%s'", c.servers[0])
+	nextOutput := c.selector.Next()
+	serverAddr := nextOutput.Server
+
+	c.logger.Infof("Connecting to address: '%s'", serverAddr)
 
 	// TODO Server Selector
-	netConn, err := net.DialTimeout("tcp", c.servers[0], connectTimeout)
+	netConn, err := net.DialTimeout("tcp", serverAddr, connectTimeout)
 	if err != nil {
 		c.mut.Lock()
 		c.state = StateDisconnected
 		c.mut.Unlock()
-		c.logger.Warnf("Failed to connect to server: '%s', error: %v", c.servers[0], err)
+		c.logger.Warnf("Failed to connect to server: '%s', error: %v", serverAddr, err)
 		return connectOutput{
 			needRetry: true,
 		}
 	}
 
-	c.logger.Infof("Connected to server: '%s'", c.servers[0])
+	c.selector.NotifyConnected()
+	c.logger.Infof("Connected to server: '%s'", serverAddr)
 
 	conn := &tcpConnImpl{
 		conn: netConn,
@@ -506,8 +520,8 @@ func (c *Client) handleEventCallback(ev handleEvent) {
 func (c *Client) setTimeouts(sessionTimeoutMs int32) {
 	c.sessionTimeoutMs = sessionTimeoutMs
 	sessionTimeout := time.Duration(sessionTimeoutMs) * time.Millisecond
-	c.recvTimeout = sessionTimeout * 2 / 3
-	c.pingInterval = c.recvTimeout / 2
+	c.recvTimeout.Store(int64(sessionTimeout * 2 / 3))
+	c.pingInterval = c.getRecvTimeout() / 2
 }
 
 func (c *Client) nextXid() int32 {
@@ -524,8 +538,10 @@ func (c *Client) authenticate(conn tcpConn) error {
 		Passwd:          c.passwd,
 	}
 
+	authTimeout := c.getRecvTimeout() * 10
+
 	// Encode and send connect request
-	_ = conn.SetWriteDeadline(c.recvTimeout * 10)
+	_ = conn.SetWriteDeadline(authTimeout)
 	_, err := encodeObject[connectRequest](req, &c.writeCodec, conn)
 	_ = conn.SetWriteDeadline(0)
 	if err != nil {
@@ -535,7 +551,7 @@ func (c *Client) authenticate(conn tcpConn) error {
 	// Receive and decode a connect response.
 	r := connectResponse{}
 
-	_ = conn.SetReadDeadline(c.recvTimeout * 10)
+	_ = conn.SetReadDeadline(authTimeout)
 	err = decodeObject[connectResponse](&r, &c.authReadCodec, conn)
 	_ = conn.SetReadDeadline(0)
 	if err != nil {
@@ -887,7 +903,7 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) connIOOutput {
 	// write length to the first 4 bytes
 	binary.BigEndian.PutUint32(buf[:4], uint32(n))
 
-	_ = conn.SetWriteDeadline(c.recvTimeout)
+	_ = conn.SetWriteDeadline(c.getRecvTimeout())
 	_, err = conn.Write(buf[:n+4])
 	_ = conn.SetWriteDeadline(0)
 	if err != nil {
@@ -900,9 +916,7 @@ func (c *Client) sendData(conn tcpConn, req clientRequest) connIOOutput {
 func (c *Client) readSingleData(conn tcpConn) connIOOutput {
 	buf := c.readCodec.buf
 
-	c.mut.Lock()
-	recvTimeout := c.recvTimeout
-	c.mut.Unlock()
+	recvTimeout := c.getRecvTimeout()
 
 	// read package length
 	_ = conn.SetReadDeadline(recvTimeout)
