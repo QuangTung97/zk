@@ -1228,7 +1228,7 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 		assert.Equal(t, 1, reconnectCalls)
 	})
 
-	t.Run("callback with sleep, then reconnected, calls in the callback should returns error", func(t *testing.T) {
+	t.Run("callback with sleep, reconnected, calls in the callback should returns error", func(t *testing.T) {
 		var reconnectCalls int
 		c := mustNewClient(t,
 			WithDialRetryDuration(100*time.Millisecond),
@@ -1250,9 +1250,11 @@ func TestClientIntegration_WithDisconnect(t *testing.T) {
 				time.Sleep(600 * time.Millisecond)
 
 				c.Get(pathVal, func(resp GetResponse, err error) {
+					log.Println("Call Get Response")
 					steps = append(steps, "get-resp")
 					errors = append(errors, err)
 				})
+				log.Println("Call Get after Sleep")
 			},
 		)
 

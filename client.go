@@ -913,7 +913,7 @@ func (c *Client) readSingleData(conn tcpConn) connIOOutput {
 
 	blen := int(binary.BigEndian.Uint32(buf[:4]))
 	if len(buf) < blen {
-		return connError(nil)
+		return connError(errors.New("message length too big"))
 	}
 
 	_ = conn.SetReadDeadline(recvTimeout)
@@ -980,6 +980,12 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 		return connIOOutput{closed: true}
 	}
 
+	output := connNormal()
+	if res.Err == errSessionExpired {
+		err = ErrConnectionClosed
+		output = connError(err)
+	}
+
 	c.addToWatcherMap(req, err)
 
 	c.handleQueue = append(c.handleQueue, handleEvent{
@@ -989,7 +995,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	})
 	c.handleCond.Signal()
 
-	return connNormal()
+	return output
 }
 
 func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) connIOOutput {

@@ -1,4 +1,2 @@
 1) Add Server Selector
-2) Check Session Expired Error Code for Receiver
-3) Handle Race when New Session Created (doing)
 4) Stress Tests with Race Detector

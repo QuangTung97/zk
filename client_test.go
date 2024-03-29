@@ -791,6 +791,114 @@ func TestClient_RecvData(t *testing.T) {
 		callback(queue[0].req.response, queue[0].zxid, nil)
 		assert.Equal(t, 0, len(c.client.watchers))
 	})
+
+	t.Run("receive session expired error", func(t *testing.T) {
+		c := newClientTest(t)
+		c.doAuthenticate()
+
+		c.client.enqueueRequest(
+			opGetData, &getDataRequest{}, &getDataResponse{},
+			nil,
+		)
+		c.client.getFromSendQueue()
+
+		buf := make([]byte, 2048)
+		n1, _ := encodePacket(buf[4:], &responseHeader{
+			Xid:  1,
+			Zxid: 73,
+			Err:  errSessionExpired,
+		})
+		binary.BigEndian.PutUint32(buf[:4], uint32(n1))
+
+		c.conn.readBuf.Write(buf[:4+n1])
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    ErrConnectionClosed,
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+
+		assert.Equal(t, 1, len(queue))
+		assert.Equal(t, ErrConnectionClosed, queue[0].err)
+	})
+
+	t.Run("read header len error", func(t *testing.T) {
+		c := newClientTest(t)
+
+		// authenticate with 12 seconds timeout
+		c.doAuthenticate()
+
+		c.conn.readBuf.Write([]byte{0, 0, 1})
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    io.ErrUnexpectedEOF,
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+		assert.Equal(t, 0, len(queue))
+
+		assert.Equal(t, []time.Duration{
+			8 * time.Second,
+		}, c.conn.readDuration)
+	})
+
+	t.Run("length of message too big", func(t *testing.T) {
+		c := newClientTest(t)
+
+		// authenticate with 12 seconds timeout
+		c.doAuthenticate()
+
+		buf := make([]byte, 2048)
+		binary.BigEndian.PutUint32(buf[:4], uint32(bufferSize+1))
+		c.conn.readBuf.Write(buf[:4])
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    errors.New("message length too big"),
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+		assert.Equal(t, 0, len(queue))
+
+		assert.Equal(t, []time.Duration{
+			8 * time.Second,
+		}, c.conn.readDuration)
+	})
+
+	t.Run("read response header error", func(t *testing.T) {
+		c := newClientTest(t)
+
+		// authenticate with 12 seconds timeout
+		c.doAuthenticate()
+
+		buf := make([]byte, 2048)
+		binary.BigEndian.PutUint32(buf[:4], uint32(7))
+		c.conn.readBuf.Write(buf[:4])
+
+		c.conn.readBuf.Write([]byte{1, 2, 3, 4, 5, 6})
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    io.ErrUnexpectedEOF,
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+		assert.Equal(t, 0, len(queue))
+	})
 }
 
 func TestClient_Ping(t *testing.T) {
