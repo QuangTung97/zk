@@ -2,6 +2,7 @@ package concurrency
 
 import (
 	"errors"
+	"log"
 	"slices"
 	"strings"
 
@@ -43,6 +44,9 @@ func (e *Lock) initFunc(sess *curator.Session) {
 				if errors.Is(err, zk.ErrConnectionClosed) {
 					sess.AddRetry(e.initFunc)
 					return
+				}
+				if errors.Is(err, zk.ErrNoNode) {
+					log.Panicf("ZNode '%s' does NOT exist", e.parent)
 				}
 				panic(err)
 			}

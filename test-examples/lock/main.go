@@ -12,17 +12,21 @@ import (
 	"github.com/QuangTung97/zk/curator"
 )
 
-func main() {
-	factory := curator.NewClientFactory([]string{"localhost"}, "user01", "password01")
-	defer factory.Close()
-
+func newNodeID() string {
 	var data [16]byte
 	_, err := rand.Reader.Read(data[:])
 	if err != nil {
 		panic(err)
 	}
 
-	nodeID := hex.EncodeToString(data[:])
+	return hex.EncodeToString(data[:])
+}
+
+func main() {
+	factory := curator.NewClientFactory([]string{"localhost"}, "user01", "password01")
+	defer factory.Close()
+
+	nodeID := newNodeID()
 	fmt.Println("NODEID:", nodeID)
 
 	l := concurrency.NewLock("/workers", nodeID)
