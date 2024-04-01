@@ -1,3 +1,3 @@
-*) Batching Read & Write to TCP (Need to do or not?)
+*) Batching Read & Write to TCP (DOING)
 *) Stress Tests with Race Detector
 *) Add Multi-Ops Transactions

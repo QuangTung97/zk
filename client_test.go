@@ -53,6 +53,10 @@ func (c *connMock) Write(d []byte) (int, error) {
 	return c.writeBuf.Write(d)
 }
 
+func (c *connMock) Flush() error {
+	return nil
+}
+
 func (c *connMock) Read(d []byte) (int, error) {
 	return c.readBuf.Read(d)
 }

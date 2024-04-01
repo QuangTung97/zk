@@ -1,25 +1,36 @@
 package zk
 
 import (
+	"bufio"
 	"net"
 	"time"
 )
 
+type Flusher interface {
+	Flush() error
+}
+
 type tcpConnImpl struct {
-	conn net.Conn
+	writer *bufio.Writer
+	conn   net.Conn
 }
 
 // NewTCPConn ...
 func NewTCPConn(conn net.Conn) NetworkConn {
 	return &tcpConnImpl{
-		conn: conn,
+		writer: bufio.NewWriter(conn),
+		conn:   conn,
 	}
 }
 
 var _ NetworkConn = &tcpConnImpl{}
 
 func (c *tcpConnImpl) Write(p []byte) (int, error) {
-	return c.conn.Write(p)
+	return c.writer.Write(p)
+}
+
+func (c *tcpConnImpl) Flush() error {
+	return c.writer.Flush()
 }
 
 func (c *tcpConnImpl) Read(p []byte) (int, error) {
