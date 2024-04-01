@@ -167,11 +167,9 @@ type handleEvent struct {
 }
 
 type clientWatchEvent struct {
-	Type   EventType
-	State  State
-	Path   string // For non-session events, the path of the watched node.
-	Err    error
-	Server string // For connection events
+	Type  EventType
+	State State
+	Path  string // For non-session events, the path of the watched node.
 }
 
 type clientWatchRequest struct {
@@ -1010,7 +1008,6 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 		Type:  watchResp.Type,
 		State: watchResp.State,
 		Path:  watchResp.Path,
-		Err:   nil,
 	}
 
 	c.mut.Lock()
@@ -1161,11 +1158,9 @@ func (c *Client) Children(
 			},
 			callback: func(ev clientWatchEvent) {
 				opts.watchCallback(Event{
-					Type:   ev.Type,
-					State:  ev.State,
-					Path:   ev.Path,
-					Err:    ev.Err,
-					Server: ev.Server,
+					Type:  ev.Type,
+					State: ev.State,
+					Path:  ev.Path,
 				})
 			},
 		}
@@ -1248,11 +1243,9 @@ func (c *Client) Get(
 			},
 			callback: func(ev clientWatchEvent) {
 				opts.watchCallback(Event{
-					Type:   ev.Type,
-					State:  ev.State,
-					Path:   ev.Path,
-					Err:    ev.Err,
-					Server: ev.Server,
+					Type:  ev.Type,
+					State: ev.State,
+					Path:  ev.Path,
 				})
 			},
 		}
@@ -1367,11 +1360,9 @@ func (c *Client) Exists(
 			},
 			callback: func(ev clientWatchEvent) {
 				opts.watchCallback(Event{
-					Type:   ev.Type,
-					State:  ev.State,
-					Path:   ev.Path,
-					Err:    ev.Err,
-					Server: ev.Server,
+					Type:  ev.Type,
+					State: ev.State,
+					Path:  ev.Path,
 				})
 			},
 		}

@@ -31,27 +31,10 @@ type authCreds struct {
 	auth   []byte
 }
 
-// Event is an Znode event sent by the server.
+// Event is a Znode event sent by the server.
 // Refer to EventType for more details.
 type Event struct {
-	Type   EventType
-	State  State
-	Path   string // For non-session events, the path of the watched node.
-	Err    error
-	Server string // For connection events
-}
-
-// HostProvider is used to represent a set of hosts a ZooKeeper client should connect to.
-// It is an analog of the Java equivalent:
-// http://svn.apache.org/viewvc/zookeeper/trunk/src/java/main/org/apache/zookeeper/client/HostProvider.java?view=markup
-type HostProvider interface {
-	// Init is called first, with the servers specified in the connection string.
-	Init(servers []string) error
-	// Len returns the number of servers.
-	Len() int
-	// Next returns the next server to connect to. retryStart will be true if we've looped through
-	// all known servers without Connected() being called.
-	Next() (server string, retryStart bool)
-	// Notify the HostProvider of a successful connection.
-	Connected()
+	Type  EventType
+	State State
+	Path  string // For non-session events, the path of the watched node.
 }
