@@ -395,11 +395,19 @@ type encoder interface {
 func decodePacket(buf []byte, st interface{}) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if e, ok := r.(runtime.Error); ok && strings.HasPrefix(e.Error(), "runtime error: slice bounds out of range") {
-				err = ErrShortBuffer
-			} else {
-				panic(r)
+			panicErr, ok := r.(error)
+			if !ok {
+				panic(err)
 			}
+
+			var e runtime.Error
+			if errors.As(panicErr, &e) &&
+				strings.HasPrefix(e.Error(), "runtime error: slice bounds out of range") {
+				err = ErrShortBuffer
+				return
+			}
+
+			panic(err)
 		}
 	}()
 
