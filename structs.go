@@ -397,7 +397,7 @@ func decodePacket(buf []byte, st interface{}) (n int, err error) {
 		if r := recover(); r != nil {
 			panicErr, ok := r.(error)
 			if !ok {
-				panic(err)
+				panic(r)
 			}
 
 			var e runtime.Error
@@ -407,7 +407,7 @@ func decodePacket(buf []byte, st interface{}) (n int, err error) {
 				return
 			}
 
-			panic(err)
+			panic(r)
 		}
 	}()
 
@@ -494,11 +494,19 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 func encodePacket(buf []byte, st interface{}) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if e, ok := r.(runtime.Error); ok && strings.HasPrefix(e.Error(), "runtime error: slice bounds out of range") {
-				err = ErrShortBuffer
-			} else {
+			panicErr, ok := r.(error)
+			if !ok {
 				panic(r)
 			}
+
+			var e runtime.Error
+			if errors.As(panicErr, &e) &&
+				strings.HasPrefix(e.Error(), "runtime error: slice bounds out of range") {
+				err = ErrShortBuffer
+				return
+			}
+
+			panic(r)
 		}
 	}()
 
