@@ -1,4 +1,4 @@
 *) Add CI Pipeline for Integration Tests
-*) Batching Read & Write to TCP
+*) Batching Read & Write to TCP (DOING)
 *) Stress Tests with Race Detector
 *) Add Multi-Ops Transactions

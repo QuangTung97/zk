@@ -181,6 +181,7 @@ type clientWatchRequest struct {
 type NetworkConn interface {
 	io.Reader
 	io.Writer
+	Flusher
 	io.Closer
 
 	// SetReadDeadline sets the deadline for future Read calls
@@ -430,6 +431,14 @@ func (c *Client) runSender(conn NetworkConn) {
 				return
 			}
 		}
+
+		_ = conn.SetWriteDeadline(c.getRecvTimeout())
+		err := conn.Flush()
+		_ = conn.SetWriteDeadline(0)
+		if err != nil {
+			c.closeTCPConn(connError(err))
+			return
+		}
 	}
 }
 
@@ -557,10 +566,13 @@ func (c *Client) authenticate(conn NetworkConn) error {
 	// Encode and send connect request
 	_ = conn.SetWriteDeadline(authTimeout)
 	_, err := encodeObject[connectRequest](req, &c.writeCodec, conn)
-	_ = conn.SetWriteDeadline(0)
 	if err != nil {
 		return err
 	}
+	if err = conn.Flush(); err != nil {
+		return err
+	}
+	_ = conn.SetWriteDeadline(0)
 
 	// Receive and decode a connect response.
 	r := connectResponse{}
