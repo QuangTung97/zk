@@ -1048,6 +1048,43 @@ func TestClient_DoConnect(t *testing.T) {
 		assert.Equal(t, StateHasSession, c.state)
 	})
 
+	t.Run("authenticate error, retry on next server", func(t *testing.T) {
+		var dialAddrs []string
+
+		conn := &connMock{}
+
+		c, err := newClientInternal(
+			[]string{"server01", "server02", "server03"},
+			6*time.Second,
+			WithServerSelector(NewServerListSelector(1235)),
+			WithDialTimeoutFunc(func(addr string, timeout time.Duration) (NetworkConn, error) {
+				dialAddrs = append(dialAddrs, addr)
+				return conn, nil
+			}),
+		)
+		if err != nil {
+			panic(err)
+		}
+
+		output := c.doConnect()
+		assert.Equal(t, false, output.closed)
+		assert.Equal(t, true, output.needRetry)
+		assert.Equal(t, false, output.withSleep)
+		assert.Nil(t, output.conn)
+
+		// retry
+		output = c.doConnect()
+		assert.Equal(t, false, output.closed)
+		assert.Equal(t, true, output.needRetry)
+		assert.Equal(t, false, output.withSleep)
+		assert.Nil(t, output.conn)
+
+		assert.Equal(t, []string{
+			"server03:2181",
+			"server02:2181",
+		}, dialAddrs)
+	})
+
 	t.Run("dial fail, need retry, without sleep", func(t *testing.T) {
 		var addrs []string
 

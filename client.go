@@ -343,7 +343,6 @@ func (c *Client) doConnect() connectOutput {
 		}
 	}
 
-	c.selector.NotifyConnected()
 	c.logger.Infof("Connected to server: '%s'", serverAddr)
 
 	c.mut.Lock()
@@ -361,6 +360,8 @@ func (c *Client) doConnect() connectOutput {
 			needRetry: true,
 		}
 	}
+
+	c.selector.NotifyConnected()
 
 	c.mut.Lock()
 	defer c.mut.Unlock()

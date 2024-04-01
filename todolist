@@ -1,3 +1,5 @@
 1) Add Server Selector (doing)
-2) Test Zookeeper with Clusters and IPTables
-3) Stress Tests with Race Detector
+2) Batching Read & Write to TCP
+3) Test Zookeeper with Clusters and IPTables
+4) Stress Tests with Race Detector
+5) Add Multi-Ops Transactions

@@ -23,7 +23,14 @@ func newNodeID() string {
 }
 
 func main() {
-	factory := curator.NewClientFactory([]string{"localhost"}, "user01", "password01")
+	factory := curator.NewClientFactory(
+		[]string{
+			"localhost:2181",
+			"localhost:2182",
+			"localhost:2183",
+		},
+		"user01", "password01",
+	)
 	defer factory.Close()
 
 	nodeID := newNodeID()
