@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"time"
@@ -39,7 +40,7 @@ func main() {
 	l := concurrency.NewLock("/workers", nodeID)
 
 	onGranted := func(sess *curator.Session, next func(sess *curator.Session)) {
-		fmt.Println("Lock Granted:", nodeID)
+		log.Printf("\033[1;32m[Lock Granted]: %s\033[0m", nodeID)
 	}
 
 	factory.Start(curator.NewChain(

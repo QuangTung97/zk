@@ -1,3 +1,4 @@
+*) Test Retry When Leader Expired (when Error = Session Expired)
 *) Batching Read & Write to TCP
 *) Test Zookeeper with Clusters and IPTables
 *) Stress Tests with Race Detector
