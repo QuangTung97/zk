@@ -356,6 +356,11 @@ func (c *Client) doConnect() connectOutput {
 		c.mut.Unlock()
 		_ = conn.Close()
 		c.logger.Warnf("Failed to authenticate to server: '%s', error: %v", serverAddr, err)
+
+		if errors.Is(err, ErrSessionExpired) {
+			c.selector.NotifyConnected()
+		}
+
 		return connectOutput{
 			needRetry: true,
 		}

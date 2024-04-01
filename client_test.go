@@ -1085,6 +1085,58 @@ func TestClient_DoConnect(t *testing.T) {
 		}, dialAddrs)
 	})
 
+	t.Run("authenticate session expired, retry on same server", func(t *testing.T) {
+		var dialAddrs []string
+
+		conn1 := &connMock{}
+		conn2 := &connMock{}
+
+		conns := []*connMock{
+			conn1,
+			conn2,
+		}
+
+		c, err := newClientInternal(
+			[]string{"server01", "server02", "server03"},
+			6*time.Second,
+			WithServerSelector(NewServerListSelector(1235)),
+			WithDialTimeoutFunc(func(addr string, timeout time.Duration) (NetworkConn, error) {
+				index := len(dialAddrs)
+				dialAddrs = append(dialAddrs, addr)
+				return conns[index], nil
+			}),
+		)
+		if err != nil {
+			panic(err)
+		}
+
+		resp := connectResponse{
+			TimeOut:   12000,
+			SessionID: 0,
+			Passwd:    []byte("new-pass"),
+		}
+		var codec codecBuffer
+		_, err = encodeObject[connectResponse](&resp, &codec, &conn1.readBuf)
+		assert.Equal(t, nil, err)
+
+		output := c.doConnect()
+		assert.Equal(t, false, output.closed)
+		assert.Equal(t, true, output.needRetry)
+		assert.Nil(t, output.conn)
+
+		// retry
+		output = c.doConnect()
+		assert.Equal(t, false, output.closed)
+		assert.Equal(t, true, output.needRetry)
+		assert.Nil(t, output.conn)
+
+		assert.Equal(t, []string{
+			"server03:2181",
+			"server03:2181",
+		}, dialAddrs)
+		assert.Equal(t, StateDisconnected, c.state)
+	})
+
 	t.Run("dial fail, need retry, without sleep", func(t *testing.T) {
 		var addrs []string
 
