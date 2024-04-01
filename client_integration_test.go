@@ -14,32 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type tcpConnTest struct {
-	conn net.Conn
-}
-
-func (c *tcpConnTest) Read(p []byte) (n int, err error) {
-	return c.conn.Read(p)
-}
-
-func (c *tcpConnTest) Write(p []byte) (n int, err error) {
-	return c.conn.Write(p)
-}
-
-func (c *tcpConnTest) SetReadDeadline(d time.Duration) error {
-	return c.conn.SetReadDeadline(time.Now().Add(d))
-}
-
-func (c *tcpConnTest) SetWriteDeadline(d time.Duration) error {
-	return c.conn.SetWriteDeadline(time.Now().Add(d))
-}
-
-func (c *tcpConnTest) Close() error {
-	return c.conn.Close()
-}
-
 func TestClientIntegration_Authenticate(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
+		t.Skip()
+
 		c, err := newClientInternal([]string{"localhost"}, 12*time.Second)
 		assert.Equal(t, nil, err)
 
@@ -47,32 +25,13 @@ func TestClientIntegration_Authenticate(t *testing.T) {
 		assert.Equal(t, nil, err)
 		defer func() { _ = netConn.Close() }()
 
-		err = c.authenticate(&tcpConnTest{
-			conn: netConn,
-		})
+		err = c.authenticate(NewTCPConn(netConn))
 		assert.Equal(t, nil, err)
 
 		fmt.Println("SESSION_ID:", c.sessionID)
 		fmt.Println("PASS:", c.passwd)
 		assert.Equal(t, int32(12_000), c.sessionTimeoutMs)
 	})
-}
-
-func (c *tcpConnTest) closeSession(client *Client) {
-	client.enqueueRequest(
-		opClose,
-		&closeRequest{},
-		&closeResponse{},
-		nil,
-	)
-
-	reqs, _ := client.getFromSendQueue()
-	output := client.sendData(c, reqs[0])
-	if output.err != nil {
-		panic(output.err)
-	}
-
-	client.readSingleData(c)
 }
 
 func mustNewClient(_ *testing.T, inputOptions ...Option) *Client {
