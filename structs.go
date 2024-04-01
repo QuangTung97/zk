@@ -203,10 +203,6 @@ type getDataResponse struct {
 	Stat Stat
 }
 
-type getSaslRequest struct {
-	Token []byte
-}
-
 type pingRequest struct{}
 type pingResponse struct{}
 
@@ -225,14 +221,6 @@ type SetDataRequest struct {
 }
 
 type setDataResponse statResponse
-
-type setSaslRequest struct {
-	Token string
-}
-
-type setSaslResponse struct {
-	Token string
-}
 
 type setWatchesRequest struct {
 	RelativeZxid int64
