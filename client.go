@@ -274,7 +274,7 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 }
 
 func (c *Client) disconnectAndCloseWhenShutdown() {
-	conn, ok := c.disconnect(nil)
+	conn, ok := c.disconnect()
 	if ok {
 		_ = conn.Close()
 	}
@@ -385,19 +385,26 @@ func (c *Client) connectAndRunTCPHandlers() {
 
 		go func() {
 			defer wg.Done()
-			c.runSender(conn, &wg)
+			c.runSender(conn)
 		}()
 
 		go func() {
 			defer wg.Done()
-			c.runReceiver(conn, &wg)
+			c.runReceiver(conn)
 		}()
 
 		wg.Wait()
+
+		// Wait for handle queue is empty (mostly)
+		ch := make(chan struct{})
+		c.appendHandleQueueError(opWatcherEvent, nil, func(res any, zxid int64, err error) {
+			close(ch)
+		})
+		<-ch
 	}
 }
 
-func (c *Client) runSender(conn NetworkConn, wg *sync.WaitGroup) {
+func (c *Client) runSender(conn NetworkConn) {
 	for {
 		requests, ok := c.getFromSendQueue()
 		if !ok {
@@ -411,29 +418,29 @@ func (c *Client) runSender(conn NetworkConn, wg *sync.WaitGroup) {
 
 		for _, req := range requests {
 			output := c.sendData(conn, req)
-			if c.connectionRunnerStopped(output, wg) {
+			if c.connectionRunnerStopped(output) {
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) connectionRunnerStopped(output connIOOutput, wg *sync.WaitGroup) bool {
+func (c *Client) connectionRunnerStopped(output connIOOutput) bool {
 	if output.closed {
 		c.disconnectAndCloseWhenShutdown()
 		return true
 	}
 	if output.broken {
-		c.disconnectAndClose(output.err, wg)
+		c.disconnectAndClose(output.err)
 		return true
 	}
 	return false
 }
 
-func (c *Client) runReceiver(conn NetworkConn, wg *sync.WaitGroup) {
+func (c *Client) runReceiver(conn NetworkConn) {
 	for {
 		output := c.readSingleData(conn)
-		if c.connectionRunnerStopped(output, wg) {
+		if c.connectionRunnerStopped(output) {
 			return
 		}
 	}
@@ -612,16 +619,14 @@ func (c *Client) reapplyAuthCreds() {
 }
 
 func (c *Client) appendHandleQueueGlobalEvent(callback func(c *Client)) {
-	c.handleQueue = append(c.handleQueue, handleEvent{
-		req: clientRequest{
-			opcode:   opWatcherEvent,
-			response: nil,
-			callback: func(res any, zxid int64, err error) {
-				callback(c)
-			},
+	req := clientRequest{
+		opcode:   opWatcherEvent,
+		response: nil,
+		callback: func(res any, zxid int64, err error) {
+			callback(c)
 		},
-	})
-	c.handleCond.Signal()
+	}
+	c.appendHandleQueue(req, nil)
 }
 
 func (c *Client) handleGlobalCallbacks(prevIsZero bool) {
@@ -775,9 +780,14 @@ func (c *Client) enqueueAlreadyLocked(
 }
 
 func (c *Client) appendHandleQueue(req clientRequest, err error) {
+	c.appendHandleQueueZxid(req, 0, err)
+}
+
+func (c *Client) appendHandleQueueZxid(req clientRequest, zxid int64, err error) {
 	c.handleQueue = append(c.handleQueue, handleEvent{
-		err: err,
-		req: req,
+		zxid: zxid,
+		err:  err,
+		req:  req,
 	})
 	c.handleCond.Signal()
 }
@@ -794,15 +804,15 @@ func (c *Client) appendHandleQueueError(
 	}, err)
 }
 
-func (c *Client) disconnectAndClose(err error, wg *sync.WaitGroup) {
-	conn, ok := c.disconnect(wg)
+func (c *Client) disconnectAndClose(err error) {
+	conn, ok := c.disconnect()
 	if ok {
 		c.logger.Warnf("Close connection with error: %v", err)
 		_ = conn.Close()
 	}
 }
 
-func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGroup) (NetworkConn, bool) {
+func (c *Client) updateStateAndFlushRequests(finalState State) (NetworkConn, bool) {
 	c.state = finalState
 	oldConn := c.conn
 	c.conn = nil
@@ -831,26 +841,13 @@ func (c *Client) updateStateAndFlushRequests(finalState State, wg *sync.WaitGrou
 
 	c.handleQueue = append(c.handleQueue, events...)
 
-	if wg != nil {
-		wg.Add(1)
-		c.handleQueue = append(c.handleQueue, handleEvent{
-			req: clientRequest{
-				opcode:   opWatcherEvent,
-				response: nil,
-				callback: func(res any, zxid int64, err error) {
-					wg.Done()
-				},
-			},
-		})
-	}
-
 	c.handleCond.Signal()
 	c.sendCond.Signal() // notify when state is changed
 
 	return oldConn, true
 }
 
-func (c *Client) disconnect(wg *sync.WaitGroup) (NetworkConn, bool) {
+func (c *Client) disconnect() (NetworkConn, bool) {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -858,7 +855,7 @@ func (c *Client) disconnect(wg *sync.WaitGroup) (NetworkConn, bool) {
 		return nil, false
 	}
 
-	return c.updateStateAndFlushRequests(StateDisconnected, wg)
+	return c.updateStateAndFlushRequests(StateDisconnected)
 }
 
 type connIOOutput struct {
@@ -997,13 +994,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	}
 
 	c.addToWatcherMap(req, err)
-
-	c.handleQueue = append(c.handleQueue, handleEvent{
-		zxid: res.Zxid,
-		req:  req,
-		err:  err,
-	})
-	c.handleCond.Signal()
+	c.appendHandleQueueZxid(req, res.Zxid, err)
 
 	return output
 }
@@ -1033,22 +1024,18 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 		delete(c.watchers, wpt)
 	}
 
-	c.handleQueue = append(c.handleQueue, handleEvent{
-		zxid: res.Zxid,
-		req: clientRequest{
-			xid:      watchEventXid,
-			opcode:   opWatcherEvent,
-			response: &ev,
-			callback: func(res any, zxid int64, err error) {
-				ev := res.(*clientWatchEvent)
-				for _, cb := range callbacks {
-					cb(*ev)
-				}
-			},
+	req := clientRequest{
+		xid:      watchEventXid,
+		opcode:   opWatcherEvent,
+		response: &ev,
+		callback: func(res any, zxid int64, err error) {
+			ev := res.(*clientWatchEvent)
+			for _, cb := range callbacks {
+				cb(*ev)
+			}
 		},
-		err: res.Err.toError(),
-	})
-	c.handleCond.Signal()
+	}
+	c.appendHandleQueueZxid(req, res.Zxid, res.Err.toError())
 
 	return connNormal()
 }

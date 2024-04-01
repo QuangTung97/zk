@@ -1831,7 +1831,7 @@ func TestClientIntegration_Connect_Same_Session_On_Two_Clients(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c2.runReceiver(conn, nil)
+		c2.runReceiver(conn)
 	}()
 
 	time.Sleep(300 * time.Millisecond)
