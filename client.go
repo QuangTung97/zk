@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"slices"
 	"sync"
@@ -1014,7 +1015,7 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 	watchResp := &watcherEvent{}
 	_, err := decodePacket(buf[16:blen], watchResp)
 	if err != nil {
-		return connError(err)
+		log.Panicf("Unable to decode watch event, err: %v", err)
 	}
 
 	ev := clientWatchEvent{

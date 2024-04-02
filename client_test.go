@@ -634,6 +634,44 @@ func TestClient_DisconnectAndClose(t *testing.T) {
 	})
 }
 
+func TestClient_CloseTCPConn(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = conn
+
+		c.client.closeTCPConn(connError(errors.New("some error")))
+
+		assert.Equal(t, 1, conn.closeCalls)
+		assert.Equal(t, StateHasSession, c.client.state)
+		assert.Nil(t, c.client.conn)
+	})
+
+	t.Run("conn is nil", func(t *testing.T) {
+		c := newClientTest(t)
+
+		conn := &connMock{}
+
+		c.client.sessionID = 3400
+		c.client.passwd = []byte("some-pass")
+		c.client.lastZxid = 8020
+		c.client.state = StateHasSession
+		c.client.conn = nil
+
+		c.client.closeTCPConn(connError(errors.New("some error")))
+
+		assert.Equal(t, 0, conn.closeCalls)
+		assert.Equal(t, StateHasSession, c.client.state)
+		assert.Nil(t, c.client.conn)
+	})
+}
+
 func TestClient_SendData(t *testing.T) {
 	t.Run("check request data", func(t *testing.T) {
 		c := newClientTest(t)
