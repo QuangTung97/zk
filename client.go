@@ -271,18 +271,20 @@ func (c *Client) getFromSendQueue() ([]clientRequest, bool) {
 	}
 }
 
-func (c *Client) disconnectAndCloseWhenShutdown() {
-	conn, ok := c.disconnect()
-	if ok {
+func (c *Client) disconnectAndClose() (closed bool) {
+	conn := c.updateStateDisconnectedAndFlushRequests()
+	if conn != nil {
 		_ = conn.Close()
+		return true
 	}
+	return false
 }
 
 func (c *Client) tryToConnect() (NetworkConn, bool) {
 	for {
 		output := c.doConnect()
 		if output.closed {
-			c.disconnectAndCloseWhenShutdown()
+			c.disconnectAndClose()
 			c.notifyHandleEventShutdown()
 			return nil, false
 		}
@@ -422,7 +424,8 @@ func (c *Client) runSender(conn NetworkConn) {
 
 		for _, req := range requests {
 			output := c.sendData(conn, req)
-			if c.connectionRunnerStopped(output) {
+			if output.broken {
+				c.closeTCPConn(output)
 				return
 			}
 		}
@@ -431,11 +434,14 @@ func (c *Client) runSender(conn NetworkConn) {
 
 func (c *Client) connectionRunnerStopped(output connIOOutput) bool {
 	if output.closed {
-		c.disconnectAndCloseWhenShutdown()
+		c.disconnectAndClose()
 		return true
 	}
 	if output.broken {
-		c.disconnectAndClose(output.err)
+		closed := c.disconnectAndClose()
+		if closed {
+			c.logger.Warnf("Close connection with error: %v", output.err)
+		}
 		return true
 	}
 	return false
@@ -808,16 +814,11 @@ func (c *Client) appendHandleQueueError(
 	}, err)
 }
 
-func (c *Client) disconnectAndClose(err error) {
-	conn, ok := c.disconnect()
-	if ok {
-		c.logger.Warnf("Close connection with error: %v", err)
-		_ = conn.Close()
-	}
-}
+func (c *Client) updateStateDisconnectedAndFlushRequests() NetworkConn {
+	c.mut.Lock()
+	defer c.mut.Unlock()
 
-func (c *Client) updateStateAndFlushRequests(finalState State) (NetworkConn, bool) {
-	c.state = finalState
+	c.state = StateDisconnected
 	oldConn := c.conn
 	c.conn = nil
 
@@ -848,18 +849,24 @@ func (c *Client) updateStateAndFlushRequests(finalState State) (NetworkConn, boo
 	c.handleCond.Signal()
 	c.sendCond.Signal() // notify when state is changed
 
-	return oldConn, true
+	return oldConn
 }
 
-func (c *Client) disconnect() (NetworkConn, bool) {
+func (c *Client) getTCPConn() NetworkConn {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	if c.state != StateHasSession {
-		return nil, false
-	}
+	oldConn := c.conn
+	c.conn = nil
+	return oldConn
+}
 
-	return c.updateStateAndFlushRequests(StateDisconnected)
+func (c *Client) closeTCPConn(output connIOOutput) {
+	conn := c.getTCPConn()
+	if conn != nil {
+		_ = conn.Close()
+		c.logger.Warnf("Close connection with error: %v", output.err)
+	}
 }
 
 type connIOOutput struct {
