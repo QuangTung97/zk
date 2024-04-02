@@ -1,5 +1,4 @@
-*) Test Retry When Leader Expired (when Error = Session Expired)
+*) Add CI Pipeline for Integration Tests
 *) Batching Read & Write to TCP
-*) Test Zookeeper with Clusters and IPTables
 *) Stress Tests with Race Detector
 *) Add Multi-Ops Transactions

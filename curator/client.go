@@ -65,7 +65,7 @@ func (f *clientFactoryImpl) Start(runner SessionRunner) {
 	auth := []byte(f.username + ":" + f.password)
 	acl := zk.DigestACL(zk.PermAll, f.username, f.password)
 
-	// channel will be closed when add auth completed (not need for the callback to be finished)
+	// channel will be closed when add auth completed (not need for the add auth callback to be finished)
 	addAuthDone := make(chan struct{})
 
 	zkClient, err := zk.NewClient(f.servers, 12*time.Second,
