@@ -1549,6 +1549,8 @@ func TestClientInternal_ACL(t *testing.T) {
 			},
 		)
 
+		c.AddAuth("digest", []byte("user01:password01"), func(resp AddAuthResponse, err error) {})
+
 		c.Set(pathVal, []byte("new-data"), 0, func(resp SetResponse, err error) {
 			steps = append(steps, "set-data")
 			respErrors = append(respErrors, err)
