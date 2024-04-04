@@ -1,11 +1,8 @@
-Native Go Zookeeper Client Library
-===================================
+# Native Go Zookeeper Client Library
 
-[![GoDoc](https://godoc.org/github.com/go-zookeeper/zk?status.svg)](https://godoc.org/github.com/go-zookeeper/zk)
-[![Build Status](https://img.shields.io/github/workflow/status/go-zookeeper/zk/unittest/master)](https://github.com/go-zookeeper/zk/actions?query=branch%3Amaster)
-[![Coverage Status](https://img.shields.io/codecov/c/github/go-zookeeper/zk/master)](https://codecov.io/gh/go-zookeeper/zk/branch/master)
+[![zk](https://github.com/QuangTung97/zk/actions/workflows/go.yml/badge.svg)](https://github.com/QuangTung97/zk/actions/workflows/go.yml)
+[![Coverage Status](https://coveralls.io/repos/github/QuangTung97/zk/badge.svg?branch=master)](https://coveralls.io/github/QuangTung97/zk?branch=master)
 
-License
--------
+## License
 
 3-clause BSD. See LICENSE file.
