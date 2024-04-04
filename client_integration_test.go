@@ -1533,7 +1533,7 @@ func TestClientInternal_ACL(t *testing.T) {
 
 		c.SetACL(
 			pathVal,
-			DigestACL(PermRead, "user01", "password01"), 0,
+			DigestACL(PermRead|PermWrite, "user01", "password01"), 0,
 			func(resp SetACLResponse, err error) {
 				steps = append(steps, "set-acl")
 				respErrors = append(respErrors, err)
