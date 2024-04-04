@@ -1,4 +1,5 @@
 *) Add CI Pipeline for Integration Tests
+*) Add Lint
 *) Batching Read & Write to TCP (Need to do or not?)
 *) Stress Tests with Race Detector
 *) Add Multi-Ops Transactions
