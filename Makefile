@@ -10,4 +10,4 @@ build:
 	go build -o bin/lock test-examples/lock/main.go
 
 coverage:
-	go tool cover -func coverage.cov | grep ^total
+	go tool cover -func coverage.out | grep ^total

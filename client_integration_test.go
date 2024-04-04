@@ -1520,7 +1520,7 @@ func TestClientInternal_ACL(t *testing.T) {
 		var steps []string
 		var respErrors []error
 
-		pathVal := "/workers01"
+		pathVal := "/acl_mismatch"
 
 		c.Create(
 			pathVal, []byte("data01"), FlagEphemeral,
