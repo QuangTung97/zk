@@ -1,4 +1,4 @@
-.PHONY: test lint build coverage
+.PHONY: test lint build coverage install-tools
 
 test:
 	go test -race -p 1 -count=1 -tags=integration -covermode=atomic -coverprofile=coverage.out ./...
@@ -13,3 +13,6 @@ build:
 
 coverage:
 	go tool cover -func coverage.out | grep ^total
+
+install-tools:
+	go install github.com/mgechev/revive
