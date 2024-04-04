@@ -34,6 +34,8 @@ Disabled = true
 Disabled = true
 [rule.flag-parameter]
 Disabled = true
+[rule.unused-parameter]
+Disabled = true
 
 # Rule tuning
 [rule.argument-limit]
