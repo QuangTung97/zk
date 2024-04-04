@@ -5,17 +5,23 @@ import (
 	"sync"
 )
 
+// SelectNextOutput ...
 type SelectNextOutput struct {
 	Server     string
-	RetryStart bool
+	RetryStart bool // equal to true if the client should sleep after retry to the next server
 }
 
+// ServerSelector for selecting servers for connecting
 type ServerSelector interface {
+	// Init the selector
 	Init(servers []string)
+	// Next choose the next server for connecting
 	Next() SelectNextOutput
+	// NotifyConnected notify the selector for retrying the same address later after successfully connected
 	NotifyConnected()
 }
 
+// ServerListSelector ...
 type ServerListSelector struct {
 	mut          sync.Mutex
 	servers      []string
@@ -25,12 +31,14 @@ type ServerListSelector struct {
 	notified     bool
 }
 
+// NewServerListSelector ...
 func NewServerListSelector(seed int64) ServerSelector {
 	return &ServerListSelector{
 		rand: rand.New(rand.NewSource(seed)),
 	}
 }
 
+// Init ...
 func (s *ServerListSelector) Init(servers []string) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
@@ -41,6 +49,7 @@ func (s *ServerListSelector) Init(servers []string) {
 	s.numNextCalls = 0
 }
 
+// Next ...
 func (s *ServerListSelector) Next() SelectNextOutput {
 	s.mut.Lock()
 	defer s.mut.Unlock()
@@ -62,6 +71,7 @@ func (s *ServerListSelector) Next() SelectNextOutput {
 	}
 }
 
+// NotifyConnected ...
 func (s *ServerListSelector) NotifyConnected() {
 	s.mut.Lock()
 	defer s.mut.Unlock()

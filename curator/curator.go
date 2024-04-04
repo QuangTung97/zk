@@ -1,5 +1,7 @@
 package curator
 
+// Curator is used for maintaining Session object.
+// when new zookeeper session is established, old Session will be invalided and can NOT be used anymore
 type Curator struct {
 	initFunc func(sess *Session)
 
@@ -7,17 +9,20 @@ type Curator struct {
 	sess   *Session
 }
 
+// SessionRunner is an interface that be implemented by Curator
 type SessionRunner interface {
 	Begin(client Client)
 	Retry()
 	End()
 }
 
+// Session represents a zookeeper session
 type Session struct {
 	retryFuncs []func(sess *Session)
 	state      *Curator
 }
 
+// New creates a Curator with simple init function when session started
 func New(
 	initFunc func(sess *Session),
 ) *Curator {
@@ -26,8 +31,11 @@ func New(
 	}
 }
 
+// SessionCallback ...
 type SessionCallback func(sess *Session, next func(sess *Session))
 
+// NewChain creates a chain of callbacks when next callback is called only after the previous callback allows.
+// For example when doing locking, ONLY after the lock is granted the next callback could allow to run.
 func NewChain(
 	initFuncList ...SessionCallback,
 ) *Curator {
@@ -44,6 +52,7 @@ func NewChain(
 	}
 }
 
+// Begin callback when new session is established
 func (c *Curator) Begin(client Client) {
 	c.client = client
 	c.sess = &Session{
@@ -52,6 +61,7 @@ func (c *Curator) Begin(client Client) {
 	c.initFunc(c.sess)
 }
 
+// Retry callback when new connection is established after disconnecting
 func (c *Curator) Retry() {
 	if c.sess == nil {
 		return
@@ -62,6 +72,7 @@ func (c *Curator) Retry() {
 	c.sess.retryFuncs = nil
 }
 
+// End callback when current session is expired
 func (c *Curator) End() {
 	c.sess = nil
 }
@@ -81,6 +92,8 @@ func (s *Session) getClient() nullClient {
 	}
 }
 
+// Run allows to access to the Client object for accessing zookeeper.
+// The callback fn function is only be called when the session is still active.
 func (s *Session) Run(fn func(client Client)) {
 	sessClient := s.getClient()
 	if !sessClient.valid {
@@ -89,6 +102,7 @@ func (s *Session) Run(fn func(client Client)) {
 	fn(sessClient.client)
 }
 
+// AddRetry add a callback function that will be called after connection is re-established.
 func (s *Session) AddRetry(callback func(sess *Session)) {
 	s.retryFuncs = append(s.retryFuncs, callback)
 }

@@ -55,5 +55,4 @@ func TestParallelRunner(t *testing.T) {
 			"init02",
 		}, steps)
 	})
-
 }

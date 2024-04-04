@@ -119,6 +119,7 @@ func (c *clientTest) addToWatchMap() {
 	}
 }
 
+//revive:disable-next-line:cognitive-complexity
 func TestClient_Authenticate(t *testing.T) {
 	t.Run("check init state", func(t *testing.T) {
 		c, err := newClientInternal([]string{"server01"}, 6*time.Second)
@@ -1004,6 +1005,7 @@ func TestClient_Exists_With_Add_Watch_With_Error(t *testing.T) {
 	assert.Equal(t, nil, existErr)
 }
 
+//revive:disable-next-line:cognitive-complexity
 func TestClient_DoConnect(t *testing.T) {
 	t.Run("authenticate error", func(t *testing.T) {
 		var dialAddr string

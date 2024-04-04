@@ -28,6 +28,12 @@ Disabled = true
 Disabled = true
 [rule.get-return]
 Disabled = true
+[rule.unchecked-type-assertion]
+Disabled = true
+[rule.var-naming]
+Disabled = true
+[rule.flag-parameter]
+Disabled = true
 
 # Rule tuning
 [rule.argument-limit]
@@ -35,7 +41,7 @@ Arguments = [6]
 [rule.cyclomatic]
 Arguments = [14]
 [rule.cognitive-complexity]
-Arguments = [16]
+Arguments = [20]
 [rule.function-result-limit]
 Arguments = [4]
 [rule.unhandled-error]

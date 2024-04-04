@@ -9,6 +9,7 @@ type tcpConnImpl struct {
 	conn net.Conn
 }
 
+// NewTCPConn ...
 func NewTCPConn(conn net.Conn) NetworkConn {
 	return &tcpConnImpl{
 		conn: conn,

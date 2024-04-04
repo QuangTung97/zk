@@ -10,12 +10,17 @@ import (
 	"github.com/QuangTung97/zk/curator"
 )
 
+// Lock is for distributed lock.
+// But this distributed lock should only be used when accessing Zookeeper.
+// It is UNSAFE to access external resources when obtaining distributed locks in general.
 type Lock struct {
 	parent    string
 	nodeID    string
 	onGranted func(sess *curator.Session)
 }
 
+// NewLock needs a path to a parent znode containing locking nodes.
+// nodeID should be at least have length of 16 characters and should be an uuid
 func NewLock(parent string, nodeID string) *Lock {
 	e := &Lock{
 		nodeID: nodeID,
@@ -32,6 +37,8 @@ const (
 	lockStatusGranted
 )
 
+// Start should be used with curator.NewChain to chaining with actions
+// that happen before locking start and after it becomes a leader
 func (e *Lock) Start(sess *curator.Session, next func(sess *curator.Session)) {
 	e.onGranted = next
 	e.initFunc(sess)
