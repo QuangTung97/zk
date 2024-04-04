@@ -1,6 +1,6 @@
 module github.com/QuangTung97/zk
 
-go 1.19
+go 1.21.2
 
 require github.com/stretchr/testify v1.9.0
 
