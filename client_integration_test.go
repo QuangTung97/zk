@@ -843,6 +843,9 @@ func clearZKData(c *Client) {
 					panic(err)
 				}
 				c.Delete(p, resp.Stat.Version, func(resp DeleteResponse, err error) {
+					if err != nil {
+						fmt.Println("[ERROR] clearZKData:", err, p)
+					}
 					wg.Done()
 				})
 			})
@@ -1606,6 +1609,35 @@ func TestClientIntegration_Delete_Empty_Node(t *testing.T) {
 	}, errors)
 }
 
+func TestClientIntegration_Delete_Node_With_Children(t *testing.T) {
+	c := mustNewClient(t)
+
+	var errors []error
+	c.Create("/workers01", nil, 0, WorldACL(PermAll), func(resp CreateResponse, err error) {
+		errors = append(errors, err)
+	})
+
+	c.Create("/workers01/data", nil, 0, WorldACL(PermAll), func(resp CreateResponse, err error) {
+		errors = append(errors, err)
+	})
+
+	c.Delete("/workers01", 0, func(resp DeleteResponse, err error) {
+		errors = append(errors, err)
+	})
+	c.Delete("/workers01/data", 0, func(resp DeleteResponse, err error) {
+		errors = append(errors, err)
+	})
+
+	c.Close()
+
+	assert.Equal(t, []error{
+		nil,
+		nil,
+		ErrNotEmpty,
+		nil,
+	}, errors)
+}
+
 func TestClientIntegration_WithInvalidPath(t *testing.T) {
 	t.Run("get", func(t *testing.T) {
 		c := mustNewClient(t)
@@ -1846,4 +1878,65 @@ func TestClientIntegration_Create_And_Watch_For_Its_Own_Deletion(t *testing.T) {
 		assert.Equal(t, []string{"create", "get-resp", "get-watch"}, steps)
 		assert.Equal(t, []error{nil, nil}, errors)
 	})
+}
+
+func newClientIntegrationWithoutPing() *Client {
+	ch := make(chan struct{}, 1)
+
+	opts := []Option{
+		WithSessionEstablishedCallback(func(c *Client) {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}),
+	}
+
+	c, err := newClientInternal([]string{"localhost"}, 12*time.Second, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	c.wg.Add(2)
+
+	go func() {
+		defer c.wg.Done()
+		c.connectAndRunTCPHandlers()
+	}()
+
+	go func() {
+		defer c.wg.Done()
+		c.runHandler()
+	}()
+
+	<-ch
+
+	clearZKData(c)
+
+	return c
+}
+
+func TestClientIntegration__Session_Expired(t *testing.T) {
+	t.Skip()
+
+	c := newClientIntegrationWithoutPing()
+
+	time.Sleep(1 * time.Second)
+	c.recvTimeout.Store(int64(30 * time.Second))
+	c.sendPingRequest()
+	log.Println("[TEST] Sent Ping")
+
+	time.Sleep(16 * time.Second)
+
+	var errors []error
+	c.Create("/workers01", nil, 0, WorldACL(PermAll), func(resp CreateResponse, err error) {
+		log.Println("[TEST] Handle Create Resp:", err)
+		errors = append(errors, err)
+	})
+
+	c.Close()
+
+	assert.Equal(t, []error{
+		nil,
+	}, errors)
 }
