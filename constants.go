@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+//revive:disable:exported
+
 const (
 	protocolVersion = 0
 	// DefaultPort is the default port listened by server.
@@ -120,8 +122,10 @@ var (
 	ErrClosing                 = errors.New("zk: zookeeper is closing")
 	ErrNothing                 = errors.New("zk: no server responses to process")
 	ErrSessionMoved            = errors.New("zk: session moved to another server, so operation is ignored")
-	ErrReconfigDisabled        = errors.New("attempts to perform a reconfiguration operation when reconfiguration feature is disabled")
-	ErrBadArguments            = errors.New("invalid arguments")
+	ErrReconfigDisabled        = errors.New(
+		"attempts to perform a reconfiguration operation when reconfiguration feature is disabled",
+	)
+	ErrBadArguments = errors.New("invalid arguments")
 
 	errCodeToError = map[ErrCode]error{
 		0:                          nil,

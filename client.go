@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// NewClient ...
 func NewClient(servers []string, sessionTimeout time.Duration, options ...Option) (*Client, error) {
 	c, err := newClientInternal(servers, sessionTimeout, options...)
 	if err != nil {
@@ -106,36 +107,43 @@ func (c *Client) getRecvTimeout() time.Duration {
 // Option ...
 type Option func(c *Client)
 
+// WithSessionEstablishedCallback ...
 func WithSessionEstablishedCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.sessEstablishedCallback = callback
 	}
 }
 
+// WithSessionExpiredCallback ...
 func WithSessionExpiredCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.sessExpiredCallback = callback
 	}
 }
 
+// WithReconnectingCallback is the callback when a new connection is re-established after disconnect
+// and session is not expired yet
 func WithReconnectingCallback(callback func(c *Client)) Option {
 	return func(c *Client) {
 		c.reconnectingCallback = callback
 	}
 }
 
+// WithDialRetryDuration ...
 func WithDialRetryDuration(d time.Duration) Option {
 	return func(c *Client) {
 		c.dialRetryDuration = d
 	}
 }
 
+// WithServerSelector ...
 func WithServerSelector(selector ServerSelector) Option {
 	return func(c *Client) {
 		c.selector = selector
 	}
 }
 
+// WithDialTimeoutFunc ...
 func WithDialTimeoutFunc(
 	dialFunc func(addr string, timeout time.Duration) (NetworkConn, error),
 ) Option {
@@ -144,6 +152,7 @@ func WithDialTimeoutFunc(
 	}
 }
 
+// WithLogger ...
 func WithLogger(l Logger) Option {
 	return func(c *Client) {
 		c.logger = l
@@ -178,6 +187,7 @@ type clientWatchRequest struct {
 	callback func(ev clientWatchEvent)
 }
 
+// NetworkConn for connections when connecting to zookeeper.
 type NetworkConn interface {
 	io.Reader
 	io.Writer
@@ -756,7 +766,6 @@ func (c *Client) enqueueAlreadyLocked(
 	callback func(resp any, zxid int64, err error),
 	watch clientWatchRequest, setAuth bool,
 ) {
-
 	xid := pingRequestXid
 	if opCode != opPing {
 		xid = c.nextXid()
@@ -1069,6 +1078,7 @@ func (c *Client) Close() {
 	c.logger.Infof("Shutdown completed")
 }
 
+// CreateResponse is the response of Create
 type CreateResponse struct {
 	Zxid int64
 	Path string
@@ -1109,6 +1119,7 @@ func (c *Client) Create(
 	)
 }
 
+// ChildrenResponse is the response of Children
 type ChildrenResponse struct {
 	Zxid     int64
 	Children []string
@@ -1119,8 +1130,10 @@ type childrenOpts struct {
 	watchCallback func(ev Event)
 }
 
+// ChildrenOption ...
 type ChildrenOption func(opts *childrenOpts)
 
+// WithChildrenWatch set the watch for Children
 func WithChildrenWatch(callback func(ev Event)) ChildrenOption {
 	return func(opts *childrenOpts) {
 		if callback == nil {
@@ -1131,6 +1144,7 @@ func WithChildrenWatch(callback func(ev Event)) ChildrenOption {
 	}
 }
 
+// Children ...
 func (c *Client) Children(
 	path string,
 	callback func(resp ChildrenResponse, err error),
@@ -1192,6 +1206,7 @@ func (c *Client) Children(
 	)
 }
 
+// GetResponse is the response of Get
 type GetResponse struct {
 	Zxid int64
 	Data []byte
@@ -1203,8 +1218,10 @@ type getOpts struct {
 	watchCallback func(ev Event)
 }
 
+// GetOption ...
 type GetOption func(opts *getOpts)
 
+// WithGetWatch set the watch for Get
 func WithGetWatch(callback func(ev Event)) GetOption {
 	return func(opts *getOpts) {
 		if callback == nil {
@@ -1215,6 +1232,7 @@ func WithGetWatch(callback func(ev Event)) GetOption {
 	}
 }
 
+// Get data of znode
 func (c *Client) Get(
 	path string,
 	callback func(resp GetResponse, err error),
@@ -1277,11 +1295,13 @@ func (c *Client) Get(
 	)
 }
 
+// SetResponse is the response of Set
 type SetResponse struct {
 	Zxid int64
 	Stat Stat
 }
 
+// Set update data of znode
 func (c *Client) Set(
 	path string, data []byte, version int32,
 	callback func(resp SetResponse, err error),
@@ -1311,6 +1331,7 @@ func (c *Client) Set(
 	)
 }
 
+// ExistsResponse is response for Exist request
 type ExistsResponse struct {
 	Zxid int64
 	Stat Stat
@@ -1321,8 +1342,10 @@ type existsOpts struct {
 	watchCallback func(ev Event)
 }
 
+// ExistsOption ...
 type ExistsOption func(opts *existsOpts)
 
+// WithExistsWatch set the watch for Exists
 func WithExistsWatch(callback func(ev Event)) ExistsOption {
 	return func(opts *existsOpts) {
 		if callback == nil {
@@ -1333,6 +1356,7 @@ func WithExistsWatch(callback func(ev Event)) ExistsOption {
 	}
 }
 
+// Exists check the existence of a znode
 func (c *Client) Exists(
 	path string,
 	callback func(resp ExistsResponse, err error),
@@ -1394,10 +1418,12 @@ func (c *Client) Exists(
 	)
 }
 
+// DeleteResponse is the response of Delete
 type DeleteResponse struct {
 	Zxid int64
 }
 
+// Delete znode with compare and set using version number
 func (c *Client) Delete(
 	path string, version int32,
 	callback func(resp DeleteResponse, err error),
@@ -1431,6 +1457,7 @@ func (c *Client) Delete(
 	)
 }
 
+// AddAuthResponse is the response of AddAuth request
 type AddAuthResponse struct {
 	Zxid int64
 }
@@ -1463,6 +1490,7 @@ func (c *Client) AddAuth(
 	)
 }
 
+// SetACLResponse is response of SetACL request
 type SetACLResponse struct {
 	Zxid int64
 	Stat Stat
@@ -1506,6 +1534,7 @@ func (c *Client) SetACL(
 	)
 }
 
+// GetACLResponse is response of GetACL request
 type GetACLResponse struct {
 	Zxid int64
 	ACL  []ACL

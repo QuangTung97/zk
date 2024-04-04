@@ -6,11 +6,13 @@ import (
 	"github.com/QuangTung97/zk"
 )
 
+// ClientFactory for creating Client
 type ClientFactory interface {
 	Start(runner SessionRunner)
 	Close()
 }
 
+// Client is a simpler interface for zookeeper client, mostly for mocking & faking for testing purpose
 type Client interface {
 	Get(path string, callback func(resp zk.GetResponse, err error))
 	GetW(path string,
@@ -40,6 +42,7 @@ type clientImpl struct {
 	acl      []zk.ACL
 }
 
+// NewClientFactory creates a ClientFactory
 func NewClientFactory(servers []string, username string, password string) ClientFactory {
 	return &clientFactoryImpl{
 		servers:  servers,
@@ -95,6 +98,7 @@ func (f *clientFactoryImpl) Close() {
 	}
 }
 
+// NewClient creates a Client
 func NewClient(zkClient *zk.Client, acl []zk.ACL) Client {
 	return &clientImpl{
 		zkClient: zkClient,

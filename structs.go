@@ -10,30 +10,39 @@ import (
 	"time"
 )
 
+//revive:disable:exported
 var (
 	ErrUnhandledFieldType = errors.New("zk: unhandled field type")
 	ErrPtrExpected        = errors.New("zk: encode/decode expect a non-nil pointer to struct")
 	ErrShortBuffer        = errors.New("zk: buffer too small")
 )
 
+//revive:enable:exported
+
+// ACL ...
 type ACL struct {
 	Perms  int32
 	Scheme string
 	ID     string
 }
 
+// Stat znode stat info
 type Stat struct {
-	Czxid          int64 // The zxid of the change that caused this znode to be created.
-	Mzxid          int64 // The zxid of the change that last modified this znode.
-	Ctime          int64 // The time in milliseconds from epoch when this znode was created.
-	Mtime          int64 // The time in milliseconds from epoch when this znode was last modified.
-	Version        int32 // The number of changes to the data of this znode.
-	Cversion       int32 // The number of changes to the children of this znode.
-	Aversion       int32 // The number of changes to the ACL of this znode.
-	EphemeralOwner int64 // The session id of the owner of this znode if the znode is an ephemeral node. If it is not an ephemeral node, it will be zero.
-	DataLength     int32 // The length of the data field of this znode.
-	NumChildren    int32 // The number of children of this znode.
-	Pzxid          int64 // last modified children
+	Czxid    int64 // The zxid of the change that caused this znode to be created.
+	Mzxid    int64 // The zxid of the change that last modified this znode.
+	Ctime    int64 // The time in milliseconds from epoch when this znode was created.
+	Mtime    int64 // The time in milliseconds from epoch when this znode was last modified.
+	Version  int32 // The number of changes to the data of this znode.
+	Cversion int32 // The number of changes to the children of this znode.
+	Aversion int32 // The number of changes to the ACL of this znode.
+
+	// The session id of the owner of this znode if the znode is an ephemeral node.
+	// If it is not an ephemeral node, it will be zero.
+	EphemeralOwner int64
+
+	DataLength  int32 // The length of the data field of this znode.
+	NumChildren int32 // The number of children of this znode.
+	Pzxid       int64 // last modified children
 }
 
 // ServerClient is the information for a single Zookeeper client and its session.
@@ -114,6 +123,7 @@ type pathRequest struct {
 	Path string
 }
 
+// PathVersionRequest ...
 type PathVersionRequest struct {
 	Path    string
 	Version int32
@@ -132,8 +142,7 @@ type statResponse struct {
 	Stat Stat
 }
 
-//
-
+// CheckVersionRequest ...
 type CheckVersionRequest PathVersionRequest
 type closeRequest struct{}
 type closeResponse struct{}
@@ -153,6 +162,7 @@ type connectResponse struct {
 	Passwd          []byte
 }
 
+// CreateRequest ...
 type CreateRequest struct {
 	Path  string
 	Data  []byte
@@ -160,8 +170,10 @@ type CreateRequest struct {
 	Flags int32
 }
 
+// CreateContainerRequest ...
 type CreateContainerRequest CreateRequest
 
+// CreateTTLRequest ...
 type CreateTTLRequest struct {
 	Path  string
 	Data  []byte
@@ -171,6 +183,8 @@ type CreateTTLRequest struct {
 }
 
 type createResponse pathResponse
+
+// DeleteRequest ...
 type DeleteRequest PathVersionRequest
 type deleteResponse struct{}
 
@@ -214,6 +228,7 @@ type setAclRequest struct {
 
 type setAclResponse statResponse
 
+// SetDataRequest ...
 type SetDataRequest struct {
 	Path    string
 	Data    []byte
@@ -239,7 +254,7 @@ type setAuthResponse struct{}
 
 type multiRequestOp struct {
 	Header multiHeader
-	Op     interface{}
+	Op     any
 }
 type multiRequest struct {
 	Ops        []multiRequestOp
@@ -380,7 +395,7 @@ type encoder interface {
 	Encode(buf []byte) (int, error)
 }
 
-func decodePacket(buf []byte, st interface{}) (n int, err error) {
+func decodePacket(buf []byte, st any) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicErr, ok := r.(error)
@@ -406,6 +421,7 @@ func decodePacket(buf []byte, st interface{}) (n int, err error) {
 	return decodePacketValue(buf, v)
 }
 
+//revive:disable-next-line:cyclomatic,cognitive-complexity
 func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	rv := v
 	kind := v.Kind()
@@ -479,7 +495,7 @@ func decodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	return n, nil
 }
 
-func encodePacket(buf []byte, st interface{}) (n int, err error) {
+func encodePacket(buf []byte, st any) (n int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicErr, ok := r.(error)
@@ -505,6 +521,7 @@ func encodePacket(buf []byte, st interface{}) (n int, err error) {
 	return encodePacketValue(buf, v)
 }
 
+//revive:disable-next-line:cyclomatic,cognitive-complexity
 func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	rv := v
 	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
@@ -577,7 +594,8 @@ func encodePacketValue(buf []byte, v reflect.Value) (int, error) {
 	return n, nil
 }
 
-func requestStructForOp(op int32) interface{} {
+//revive:disable-next-line:cyclomatic
+func requestStructForOp(op int32) any {
 	switch op {
 	case opClose:
 		return &closeRequest{}

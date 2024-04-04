@@ -9,13 +9,16 @@ import (
 	"github.com/QuangTung97/zk"
 )
 
+// FakeSessionState ...
 type FakeSessionState struct {
 	SessionID  int64
 	HasSession bool
 }
 
+// FakeClientID ...
 type FakeClientID string
 
+// ZNode ...
 type ZNode struct {
 	Name     string
 	Data     []byte
@@ -32,6 +35,7 @@ type ZNode struct {
 	DataWatches     []func(ev zk.Event)
 }
 
+// FakeZookeeper ...
 type FakeZookeeper struct {
 	States   map[FakeClientID]*FakeSessionState
 	Sessions map[FakeClientID]SessionRunner
@@ -45,6 +49,7 @@ type FakeZookeeper struct {
 	Zxid int64
 }
 
+// NewFakeZookeeper ...
 func NewFakeZookeeper() *FakeZookeeper {
 	return &FakeZookeeper{
 		States:   map[FakeClientID]*FakeSessionState{},
@@ -65,6 +70,7 @@ type fakeClientFactory struct {
 	clientID FakeClientID
 }
 
+// NewFakeClientFactory ...
 func NewFakeClientFactory(store *FakeZookeeper, clientID FakeClientID) ClientFactory {
 	store.States[clientID] = &FakeSessionState{
 		HasSession: false,
@@ -84,9 +90,11 @@ func (c *fakeClientFactory) Start(runner SessionRunner) {
 	}
 }
 
+// Close ...
 func (c *fakeClientFactory) Close() {
 }
 
+// Begin ...
 func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	state := s.States[clientID]
 	if state.HasSession {
@@ -121,6 +129,7 @@ func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID
 	}
 }
 
+// SessionExpired ...
 func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	state := s.States[clientID]
 	if !state.HasSession {
@@ -206,6 +215,7 @@ func getActionWithType[T any](s *FakeZookeeper, clientID FakeClientID, methodNam
 	return val
 }
 
+// PrintPendingCalls ...
 func (s *FakeZookeeper) PrintPendingCalls() {
 	for client, actions := range s.Pending {
 		if len(actions) == 0 {
@@ -223,6 +233,7 @@ func (s *FakeZookeeper) PrintPendingCalls() {
 	}
 }
 
+// PrintData ...
 func (s *FakeZookeeper) PrintData() {
 	s.printDataRecur(s.Root, "")
 }
@@ -247,6 +258,7 @@ func (s *FakeZookeeper) printDataRecur(node *ZNode, space string) {
 	}
 }
 
+// PendingCalls ...
 func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 	values := make([]string, 0)
 	for _, input := range s.Pending[clientID] {
@@ -278,6 +290,7 @@ func (s *FakeZookeeper) PendingCalls(clientID FakeClientID) []string {
 	return values
 }
 
+// CreateCall ...
 func (s *FakeZookeeper) CreateCall(clientID FakeClientID) CreateInput {
 	return getActionWithType[CreateInput](s, clientID, "Create")
 }
@@ -288,10 +301,12 @@ func (s *FakeZookeeper) popFirst(clientID FakeClientID) {
 	s.Pending[clientID] = actions
 }
 
+// CreateApply ...
 func (s *FakeZookeeper) CreateApply(clientID FakeClientID) {
 	s.createApplyWithErr(clientID, nil)
 }
 
+// CreateApplyError ...
 func (s *FakeZookeeper) CreateApplyError(clientID FakeClientID) {
 	s.createApplyWithErr(clientID, zk.ErrConnectionClosed)
 }
@@ -354,11 +369,13 @@ func (s *FakeZookeeper) notifyChildrenWatches(parent *ZNode, path string) {
 	parent.ChildrenWatches = nil
 }
 
+// ConnError ...
 func (s *FakeZookeeper) ConnError(clientID FakeClientID) {
 	s.runAllCallbacksWithConnectionError(clientID)
 	s.appendActions(clientID, RetryInput{})
 }
 
+// ChildrenApply ...
 func (s *FakeZookeeper) ChildrenApply(clientID FakeClientID) {
 	input := getActionWithType[ChildrenInput](s, clientID, "Children")
 
@@ -381,6 +398,7 @@ func (s *FakeZookeeper) ChildrenApply(clientID FakeClientID) {
 	}, nil)
 }
 
+// GetApply ...
 func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
 	input := getActionWithType[GetInput](s, clientID, "Get")
 
@@ -401,6 +419,7 @@ func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
 	}, nil)
 }
 
+// SetApply ...
 func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 	input := getActionWithType[SetInput](s, clientID, "Set")
 
@@ -429,6 +448,7 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 	}, nil)
 }
 
+// DeleteApply ...
 func (s *FakeZookeeper) DeleteApply(clientID FakeClientID) {
 	input := getActionWithType[DeleteInput](s, clientID, "Delete")
 	node := s.findNode(input.Path)
@@ -475,6 +495,7 @@ func (s *FakeZookeeper) notifyDataWatches(node *ZNode, path string, eventType zk
 	node.DataWatches = nil
 }
 
+// Retry ...
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 

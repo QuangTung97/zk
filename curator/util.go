@@ -4,6 +4,7 @@ type parallelRunnerImpl struct {
 	runners []SessionRunner
 }
 
+// NewParallelRunner creates a SessionRunner that calls methods of all input runners
 func NewParallelRunner(runners ...SessionRunner) SessionRunner {
 	return &parallelRunnerImpl{
 		runners: runners,

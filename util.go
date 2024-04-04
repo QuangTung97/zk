@@ -24,6 +24,7 @@ func WorldACL(perms int32) []ACL {
 	return []ACL{{perms, "world", "anyone"}}
 }
 
+// DigestACL for username password authorization.
 func DigestACL(perms int32, user, password string) []ACL {
 	userPass := []byte(fmt.Sprintf("%s:%s", user, password))
 	h := sha1.New()
@@ -66,12 +67,9 @@ func stringShuffleRand(s []string, r *rand.Rand) {
 }
 
 // ValidatePath will make sure a path is valid before sending the request
+//
+//revive:disable-next-line:cyclomatic,cognitive-complexity
 func ValidatePath(path string, isSequential bool) error {
-	return validatePath(path, isSequential)
-}
-
-// validatePath will make sure a path is valid before sending the request
-func validatePath(path string, isSequential bool) error {
 	if path == "" {
 		return ErrInvalidPath
 	}
