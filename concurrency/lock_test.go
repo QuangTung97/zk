@@ -1,8 +1,10 @@
 package concurrency
 
 import (
+	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -12,6 +14,7 @@ import (
 
 const client1 curator.FakeClientID = "client1"
 const client2 curator.FakeClientID = "client2"
+const client3 curator.FakeClientID = "client3"
 const initClient curator.FakeClientID = "init"
 
 func initStore(parent string) *curator.FakeZookeeper {
@@ -335,4 +338,63 @@ func TestSortString(t *testing.T) {
 	assert.Equal(t, []string{
 		"A", "B", "D", "EE", "IA", "IY", "M", "Z",
 	}, s)
+}
+
+func TestLock_With_Tester(t *testing.T) {
+	l1 := NewLock("/workers", "node01")
+	l2 := NewLock("/workers", "node02")
+	l3 := NewLock("/workers", "node03")
+
+	store := initStore("/workers")
+
+	tester := curator.NewFakeZookeeperTester(store,
+		[]curator.FakeClientID{client1, client2, client3},
+		123,
+	)
+
+	startLock(l1, store, client1, newSimpleCounter(client1).isLeader)
+	startLock(l2, store, client2, newSimpleCounter(client2).isLeader)
+	startLock(l3, store, client3, newSimpleCounter(client3).isLeader)
+
+	tester.Begin()
+
+	steps := tester.RunSessionExpiredAndConnectionError(
+		10,
+		10,
+		2000,
+	)
+	assert.Equal(t, 2000, steps)
+
+	store.PrintData()
+}
+
+func TestLock_With_Tester__Multi_Times(t *testing.T) {
+	for k := 0; k < 1000; k++ {
+		seed := time.Now().UnixNano()
+		fmt.Println("SEED:", seed)
+
+		l1 := NewLock("/workers", "node01")
+		l2 := NewLock("/workers", "node02")
+		l3 := NewLock("/workers", "node03")
+
+		store := initStore("/workers")
+
+		tester := curator.NewFakeZookeeperTester(store,
+			[]curator.FakeClientID{client1, client2, client3},
+			seed,
+		)
+
+		startLock(l1, store, client1, newSimpleCounter(client1).isLeader)
+		startLock(l2, store, client2, newSimpleCounter(client2).isLeader)
+		startLock(l3, store, client3, newSimpleCounter(client3).isLeader)
+
+		tester.Begin()
+
+		steps := tester.RunSessionExpiredAndConnectionError(
+			20,
+			20,
+			2000,
+		)
+		assert.Equal(t, 2000, steps)
+	}
 }

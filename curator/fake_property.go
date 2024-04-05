@@ -41,6 +41,7 @@ RetrySelect:
 		for _, c := range f.clients {
 			if !f.store.States[c].HasSession {
 				sessionExpiredClients = append(sessionExpiredClients, c)
+				continue
 			}
 
 			if len(f.store.Pending[c]) == 0 {
@@ -74,6 +75,9 @@ func (f *FakeZookeeperTester) doSessionExpired(client FakeClientID) {
 }
 
 func (f *FakeZookeeperTester) doConnectionError(client FakeClientID) {
+	if f.store.States[client].ConnErr {
+		return
+	}
 	cmds := f.store.Pending[client]
 	if len(cmds) == 0 {
 		f.store.ConnError(client)
@@ -91,7 +95,7 @@ func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 	sessionExpiredPercentage float64,
 	connectionErrorPercentage float64,
 	numSteps int,
-) {
+) int {
 	sessionExpiredEnd := int(sessionExpiredPercentage / 100.0 * randMax)
 	connectionErrorEnd := int(connectionErrorPercentage / 100.0 * randMax)
 
@@ -114,7 +118,7 @@ func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 
 		client, ok := f.getActionableRandomClient()
 		if !ok {
-			return
+			return i + 1
 		}
 		genericCmd := f.store.Pending[client][0]
 		switch genericCmd.(type) {
@@ -122,6 +126,10 @@ func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 			f.store.CreateApply(client)
 		case GetInput:
 			f.store.GetApply(client)
+		case ChildrenInput:
+			f.store.ChildrenApply(client)
+		case DeleteInput:
+			f.store.DeleteApply(client)
 		case SetInput:
 			f.store.SetApply(client)
 		case RetryInput:
@@ -130,4 +138,6 @@ func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 			panic(fmt.Sprintf("unknown command: %s%+v", reflect.TypeOf(genericCmd).String(), genericCmd))
 		}
 	}
+
+	return numSteps
 }

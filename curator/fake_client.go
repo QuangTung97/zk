@@ -384,7 +384,11 @@ func (s *FakeZookeeper) notifyChildrenWatches(parent *ZNode, path string) {
 
 // ConnError ...
 func (s *FakeZookeeper) ConnError(clientID FakeClientID) {
-	s.States[clientID].ConnErr = true
+	state := s.States[clientID]
+	if state.ConnErr {
+		panic("Can NOT call ConnError multiple times in a row")
+	}
+	state.ConnErr = true
 	s.runAllCallbacksWithConnectionError(clientID, true)
 }
 
@@ -513,6 +517,7 @@ func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 
 	state := s.States[clientID]
+	state.ConnErr = false
 	for _, fn := range state.PendingEvents {
 		fn()
 	}
