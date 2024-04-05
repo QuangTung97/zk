@@ -13,6 +13,9 @@ import (
 type FakeSessionState struct {
 	SessionID  int64
 	HasSession bool
+	ConnErr    bool
+
+	PendingEvents []func()
 }
 
 // FakeClientID ...
@@ -100,17 +103,25 @@ func (s *FakeZookeeper) Begin(clientID FakeClientID) {
 	if state.HasSession {
 		panic("can not call Begin on client already had session")
 	}
-	state.HasSession = true
+
 	s.NextSessionID++
-	state.SessionID = s.NextSessionID
+	*state = FakeSessionState{
+		HasSession: true,
+		SessionID:  s.NextSessionID,
+	}
+
 	client := s.Clients[clientID]
 	runner := s.Sessions[clientID]
 	runner.Begin(client)
 }
 
-func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID) {
+func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID, withRetry bool) {
 	actions := s.Pending[clientID]
 	s.Pending[clientID] = nil
+	if withRetry {
+		s.appendActions(clientID, RetryInput{})
+	}
+
 	for _, input := range actions {
 		switch inputVal := input.(type) {
 		case CreateInput:
@@ -123,6 +134,7 @@ func (s *FakeZookeeper) runAllCallbacksWithConnectionError(clientID FakeClientID
 			inputVal.Callback(zk.SetResponse{}, zk.ErrConnectionClosed)
 		case DeleteInput:
 			inputVal.Callback(zk.DeleteResponse{}, zk.ErrConnectionClosed)
+		case RetryInput:
 		default:
 			panic("unknown input type")
 		}
@@ -138,14 +150,15 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	state.HasSession = false
 	sessionID := state.SessionID
 	state.SessionID = 0
-
-	s.runAllCallbacksWithConnectionError(clientID)
-
-	s.Zxid++
-	s.deleteNodesRecursiveForSessionID(s.Root, "", sessionID)
+	state.ConnErr = true
 
 	runner := s.Sessions[clientID]
 	runner.End()
+
+	s.runAllCallbacksWithConnectionError(clientID, false)
+
+	s.Zxid++
+	s.deleteNodesRecursiveForSessionID(s.Root, "", sessionID)
 }
 
 func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, path string, sessionID int64) {
@@ -371,8 +384,8 @@ func (s *FakeZookeeper) notifyChildrenWatches(parent *ZNode, path string) {
 
 // ConnError ...
 func (s *FakeZookeeper) ConnError(clientID FakeClientID) {
-	s.runAllCallbacksWithConnectionError(clientID)
-	s.appendActions(clientID, RetryInput{})
+	s.States[clientID].ConnErr = true
+	s.runAllCallbacksWithConnectionError(clientID, true)
 }
 
 // ChildrenApply ...
@@ -499,6 +512,11 @@ func (s *FakeZookeeper) notifyDataWatches(node *ZNode, path string, eventType zk
 func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 
+	state := s.States[clientID]
+	for _, fn := range state.PendingEvents {
+		fn()
+	}
+	state.PendingEvents = nil
 	runner := s.Sessions[clientID]
 	runner.Retry()
 }
@@ -517,6 +535,19 @@ func (c *fakeClient) Get(path string, callback func(resp zk.GetResponse, err err
 	c.store.appendActions(c.clientID, input)
 }
 
+func (c *fakeClient) buildWatcher(fn func(ev zk.Event)) func(ev zk.Event) {
+	return func(ev zk.Event) {
+		state := c.store.States[c.clientID]
+		if state.ConnErr {
+			state.PendingEvents = append(state.PendingEvents, func() {
+				fn(ev)
+			})
+			return
+		}
+		fn(ev)
+	}
+}
+
 func (c *fakeClient) GetW(path string,
 	callback func(resp zk.GetResponse, err error),
 	watcher func(ev zk.Event),
@@ -526,13 +557,20 @@ func (c *fakeClient) GetW(path string,
 		Path:     path,
 		Callback: callback,
 		Watch:    true,
-		Watcher:  watcher,
+		Watcher:  c.buildWatcher(watcher),
 	}
 	c.store.appendActions(c.clientID, input)
 }
 
 func (s *FakeZookeeper) appendActions(clientID FakeClientID, action any) {
-	s.Pending[clientID] = append(s.Pending[clientID], action)
+	current := s.Pending[clientID]
+	if len(current) > 0 {
+		_, ok := current[0].(RetryInput)
+		if ok {
+			panic("can not add any more actions after connection error")
+		}
+	}
+	s.Pending[clientID] = append(current, action)
 }
 
 func (c *fakeClient) Children(path string, callback func(resp zk.ChildrenResponse, err error)) {
@@ -553,7 +591,7 @@ func (c *fakeClient) ChildrenW(path string,
 		Path:     path,
 		Callback: callback,
 		Watch:    true,
-		Watcher:  watcher,
+		Watcher:  c.buildWatcher(watcher),
 	}
 	c.store.appendActions(c.clientID, input)
 }

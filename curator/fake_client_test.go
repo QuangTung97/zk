@@ -1,6 +1,7 @@
 package curator
 
 import (
+	stderrors "errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 
 const client1 FakeClientID = "client01"
 const client2 FakeClientID = "client02"
+const client3 FakeClientID = "client03"
 
 type fakeClientTest struct {
 	store *FakeZookeeper
@@ -1126,4 +1128,201 @@ func TestFakeClient_Delete_Children_Watch(t *testing.T) {
 		State: 3,
 		Path:  "/",
 	}, watchEvent)
+}
+
+func TestFakeClient_Should_Not_Have_Any_Action_After_Conn_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Get("/workers", func(resp zk.GetResponse, err error) {
+			if err != nil {
+				if stderrors.Is(err, zk.ErrConnectionClosed) {
+					client.Get("/another", func(resp zk.GetResponse, err error) {})
+					return
+				}
+				panic(err)
+			}
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	assert.Equal(t, []string{"get"}, c.store.PendingCalls(client1))
+
+	assert.PanicsWithValue(t, "can not add any more actions after connection error", func() {
+		c.store.ConnError(client1)
+	})
+}
+
+func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
+	}
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.GetW("/worker", func(resp zk.GetResponse, err error) {
+				c.addStep("get-resp")
+			}, func(ev zk.Event) {
+				c.addStep("get-watch")
+			})
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.CreateApply(client1)
+
+	c.store.GetApply(client2)
+	c.store.ConnError(client2)
+
+	c.store.SessionExpired(client1)
+
+	assert.Equal(t, []string{
+		"get-resp",
+	}, c.steps)
+
+	c.store.Retry(client2)
+
+	assert.Equal(t, []string{
+		"get-resp",
+		"get-watch",
+	}, c.steps)
+}
+
+func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error_For_ChildrenW(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
+	}
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				c.addStep("children-resp")
+			}, func(ev zk.Event) {
+				c.addStep("children-watch")
+			})
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.ChildrenApply(client2)
+	c.store.ConnError(client2)
+
+	c.store.CreateApply(client1)
+
+	assert.Equal(t, []string{
+		"children-resp",
+	}, c.steps)
+
+	c.store.Retry(client2)
+
+	assert.Equal(t, []string{
+		"children-resp",
+		"children-watch",
+	}, c.steps)
+}
+
+func TestFakeClient_Should_Not_Recv_Watch_After_Conn_Error_And_Expired_For_ChildrenW(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
+	}
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				c.addStep("children-resp")
+			}, func(ev zk.Event) {
+				c.addStep("children-watch")
+			})
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.ChildrenApply(client2)
+	c.store.ConnError(client2)
+
+	c.store.CreateApply(client1)
+
+	assert.Equal(t, []string{
+		"children-resp",
+	}, c.steps)
+
+	c.store.SessionExpired(client2)
+	c.store.Begin(client2)
+	c.store.ConnError(client2)
+	c.store.Retry(client2)
+
+	assert.Equal(t, []string{
+		"children-resp",
+		"children-resp",
+	}, c.steps)
+}
+
+func TestFakeClient_Should_Not_Recv_Watch_After_Expired_For_ChildrenW(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {})
+	}
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				c.addStep("children-resp")
+			}, func(ev zk.Event) {
+				c.addStep("children-watch")
+			})
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.ChildrenApply(client2)
+
+	assert.Equal(t, []string{
+		"children-resp",
+	}, c.steps)
+
+	c.store.SessionExpired(client2)
+
+	c.store.CreateApply(client1)
+
+	assert.Equal(t, []string{
+		"children-resp",
+	}, c.steps)
 }
