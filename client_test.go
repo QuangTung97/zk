@@ -803,7 +803,7 @@ func TestClient_RecvData(t *testing.T) {
 					path:  "/workers-resp",
 					wType: watchTypeData,
 				},
-				callback: func(ev clientWatchEvent) {},
+				callback: func(ev Event) {},
 			},
 		)
 
@@ -820,7 +820,7 @@ func TestClient_RecvData(t *testing.T) {
 			req: clientRequest{
 				xid:    -1,
 				opcode: opWatcherEvent,
-				response: &clientWatchEvent{
+				response: &Event{
 					Type:  EventNodeDataChanged,
 					State: StateHasSession,
 					Path:  "/workers-resp",
@@ -847,6 +847,74 @@ func TestClient_RecvData(t *testing.T) {
 			Xid:  1,
 			Zxid: 73,
 			Err:  errSessionExpired,
+		})
+		binary.BigEndian.PutUint32(buf[:4], uint32(n1))
+
+		c.conn.readBuf.Write(buf[:4+n1])
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    ErrConnectionClosed,
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+
+		assert.Equal(t, 1, len(queue))
+		assert.Equal(t, ErrConnectionClosed, queue[0].err)
+	})
+
+	t.Run("receive session moved error", func(t *testing.T) {
+		c := newClientTest(t)
+		c.doAuthenticate()
+
+		c.client.enqueueRequest(
+			opGetData, &getDataRequest{}, &getDataResponse{},
+			nil,
+		)
+		c.client.getFromSendQueue()
+
+		buf := make([]byte, 2048)
+		n1, _ := encodePacket(buf[4:], &responseHeader{
+			Xid:  1,
+			Zxid: 73,
+			Err:  errSessionMoved,
+		})
+		binary.BigEndian.PutUint32(buf[:4], uint32(n1))
+
+		c.conn.readBuf.Write(buf[:4+n1])
+
+		output := c.client.readSingleData(c.conn)
+		assert.Equal(t, connIOOutput{
+			closed: false,
+			broken: true,
+			err:    ErrConnectionClosed,
+		}, output)
+
+		// Check Handle Queue
+		queue := c.client.handleQueue
+
+		assert.Equal(t, 1, len(queue))
+		assert.Equal(t, ErrConnectionClosed, queue[0].err)
+	})
+
+	t.Run("receive zookeeper is closing error", func(t *testing.T) {
+		c := newClientTest(t)
+		c.doAuthenticate()
+
+		c.client.enqueueRequest(
+			opGetData, &getDataRequest{}, &getDataResponse{},
+			nil,
+		)
+		c.client.getFromSendQueue()
+
+		buf := make([]byte, 2048)
+		n1, _ := encodePacket(buf[4:], &responseHeader{
+			Xid:  1,
+			Zxid: 73,
+			Err:  errClosing,
 		})
 		binary.BigEndian.PutUint32(buf[:4], uint32(n1))
 
