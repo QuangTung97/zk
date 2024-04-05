@@ -152,13 +152,13 @@ func (s *FakeZookeeper) SessionExpired(clientID FakeClientID) {
 	state.SessionID = 0
 	state.ConnErr = true
 
-	runner := s.Sessions[clientID]
-	runner.End()
-
 	s.runAllCallbacksWithConnectionError(clientID, false)
 
 	s.Zxid++
 	s.deleteNodesRecursiveForSessionID(s.Root, "", sessionID)
+
+	runner := s.Sessions[clientID]
+	runner.End()
 }
 
 func (s *FakeZookeeper) deleteNodesRecursiveForSessionID(parent *ZNode, path string, sessionID int64) {
