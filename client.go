@@ -1009,7 +1009,7 @@ func (c *Client) handleNormalResponse(res responseHeader, buf []byte, blen int) 
 	}
 
 	output := connNormal()
-	if res.Err == errSessionExpired {
+	if res.Err == errSessionExpired || res.Err == errSessionMoved || res.Err == errClosing {
 		err = ErrConnectionClosed
 		output = connError(err)
 	}
