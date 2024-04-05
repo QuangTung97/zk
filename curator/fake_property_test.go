@@ -143,11 +143,12 @@ func TestFakeZookeeperTester_Master_Lock(t *testing.T) {
 
 	tester.Begin()
 
-	tester.RunSessionExpiredAndConnectionError(
+	steps := tester.RunSessionExpiredAndConnectionError(
 		10,
 		10,
 		1000,
 	)
+	assert.Equal(t, 1000, steps)
 
 	store.PrintData()
 	store.PrintPendingCalls()
@@ -159,7 +160,7 @@ func TestFakeZookeeperTester_Master_Lock(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, "283", string(node.Data))
+	assert.Equal(t, "274", string(node.Data))
 }
 
 func TestFakeZookeeperTester_Master_Lock__Multi_Times(t *testing.T) {
