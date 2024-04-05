@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-//revive:disable:exported
-
 const (
 	protocolVersion = 0
 	// DefaultPort is the default port listened by server.
@@ -40,10 +38,13 @@ const (
 )
 
 const (
-	// EventNodeCreated represents a node is created.
-	EventNodeCreated         EventType = 1
-	EventNodeDeleted         EventType = 2
-	EventNodeDataChanged     EventType = 3
+	// EventNodeCreated represents a znode is created.
+	EventNodeCreated EventType = 1
+	// EventNodeDeleted represents a znode is deleted
+	EventNodeDeleted EventType = 2
+	// EventNodeDataChanged represents a znode data is changed by Set
+	EventNodeDataChanged EventType = 3
+	// EventNodeChildrenChanged when the children of a znode created or deleted
 	EventNodeChildrenChanged EventType = 4
 )
 
@@ -55,6 +56,8 @@ var (
 		EventNodeChildrenChanged: "EventNodeChildrenChanged",
 	}
 )
+
+//revive:disable:exported
 
 const (
 	// StateUnknown means the session state is unknown.

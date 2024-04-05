@@ -803,7 +803,7 @@ func TestClient_RecvData(t *testing.T) {
 					path:  "/workers-resp",
 					wType: watchTypeData,
 				},
-				callback: func(ev clientWatchEvent) {},
+				callback: func(ev Event) {},
 			},
 		)
 
@@ -820,7 +820,7 @@ func TestClient_RecvData(t *testing.T) {
 			req: clientRequest{
 				xid:    -1,
 				opcode: opWatcherEvent,
-				response: &clientWatchEvent{
+				response: &Event{
 					Type:  EventNodeDataChanged,
 					State: StateHasSession,
 					Path:  "/workers-resp",

@@ -91,7 +91,7 @@ type Client struct {
 	conn NetworkConn
 
 	creds    []authCreds
-	watchers map[watchPathType][]func(ev clientWatchEvent)
+	watchers map[watchPathType][]func(ev Event)
 	// =================================
 
 	wg sync.WaitGroup
@@ -176,15 +176,9 @@ type handleEvent struct {
 	req  clientRequest
 }
 
-type clientWatchEvent struct {
-	Type  EventType
-	State State
-	Path  string // For non-session events, the path of the watched node.
-}
-
 type clientWatchRequest struct {
 	pathType watchPathType
-	callback func(ev clientWatchEvent)
+	callback func(ev Event)
 }
 
 // NetworkConn for connections when connecting to zookeeper.
@@ -233,7 +227,7 @@ func newClientInternal(servers []string, sessionTimeout time.Duration, options .
 
 		recvMap: map[int32]clientRequest{},
 
-		watchers: map[watchPathType][]func(ev clientWatchEvent){},
+		watchers: map[watchPathType][]func(ev Event){},
 
 		pingSignalChan: make(chan struct{}, 10),
 		pingCloseChan:  make(chan struct{}),
@@ -596,7 +590,7 @@ func (c *Client) authenticate(conn NetworkConn) error {
 			c.appendHandleQueueGlobalEvent(c.sessExpiredCallback)
 		}
 
-		c.watchers = map[watchPathType][]func(ev clientWatchEvent){}
+		c.watchers = map[watchPathType][]func(ev Event){}
 
 		c.mut.Unlock()
 
@@ -1027,7 +1021,7 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 		log.Panicf("Unable to decode watch event, err: %v", err)
 	}
 
-	ev := clientWatchEvent{
+	ev := Event{
 		Type:  watchResp.Type,
 		State: watchResp.State,
 		Path:  watchResp.Path,
@@ -1037,7 +1031,7 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 	defer c.mut.Unlock()
 
 	watchTypes := computeWatchTypes(watchResp.Type)
-	var callbacks []func(ev clientWatchEvent)
+	var callbacks []func(ev Event)
 	for _, wType := range watchTypes {
 		wpt := watchPathType{path: ev.Path, wType: wType}
 		callbacks = append(callbacks, c.watchers[wpt]...)
@@ -1049,7 +1043,7 @@ func (c *Client) handleWatchEvent(buf []byte, blen int, res responseHeader) conn
 		opcode:   opWatcherEvent,
 		response: &ev,
 		callback: func(res any, zxid int64, err error) {
-			ev := res.(*clientWatchEvent)
+			ev := res.(*Event)
 			for _, cb := range callbacks {
 				cb(*ev)
 			}
@@ -1184,12 +1178,8 @@ func (c *Client) Children(
 				path:  path,
 				wType: watchTypeChild,
 			},
-			callback: func(ev clientWatchEvent) {
-				opts.watchCallback(Event{
-					Type:  ev.Type,
-					State: ev.State,
-					Path:  ev.Path,
-				})
+			callback: func(ev Event) {
+				opts.watchCallback(ev)
 			},
 		}
 	}
@@ -1273,12 +1263,8 @@ func (c *Client) Get(
 				path:  path,
 				wType: watchTypeData,
 			},
-			callback: func(ev clientWatchEvent) {
-				opts.watchCallback(Event{
-					Type:  ev.Type,
-					State: ev.State,
-					Path:  ev.Path,
-				})
+			callback: func(ev Event) {
+				opts.watchCallback(ev)
 			},
 		}
 	}
@@ -1396,12 +1382,8 @@ func (c *Client) Exists(
 				path:  path,
 				wType: watchTypeExist,
 			},
-			callback: func(ev clientWatchEvent) {
-				opts.watchCallback(Event{
-					Type:  ev.Type,
-					State: ev.State,
-					Path:  ev.Path,
-				})
+			callback: func(ev Event) {
+				opts.watchCallback(ev)
 			},
 		}
 	}
