@@ -4,7 +4,6 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/QuangTung97/zk"
@@ -1342,7 +1341,7 @@ func TestFakeClient_Retry_Happens_Before_Watch_Handlers(t *testing.T) {
 			c.addStep("get-req")
 			client.Get("/hello", func(resp zk.GetResponse, err error) {
 				c.addStep("get-resp")
-				if errors.Is(err, zk.ErrConnectionClosed) {
+				if stderrors.Is(err, zk.ErrConnectionClosed) {
 					sess.AddRetry(getFunc)
 					return
 				}
