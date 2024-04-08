@@ -332,7 +332,13 @@ func (s *FakeZookeeper) createApplyWithErr(clientID FakeClientID, err error) {
 		return
 	}
 
+	if parent.Flags&zk.FlagEphemeral != 0 {
+		input.Callback(zk.CreateResponse{}, zk.ErrNoChildrenForEphemerals)
+		return
+	}
+
 	nodeName := stdpath.Base(input.Path)
+
 	if input.Flags&zk.FlagSequence != 0 {
 		nodeName = nodeName + fmt.Sprintf("%010d", parent.NextSeq)
 		parent.NextSeq++

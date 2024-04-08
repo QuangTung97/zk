@@ -1385,3 +1385,106 @@ func TestFakeClient_Retry_Happens_Before_Watch_Handlers(t *testing.T) {
 		"children-watch",
 	}, c.steps)
 }
+
+func TestFakeClient_Create_With_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp01")
+			errors = append(errors, err)
+		})
+		client.Create("/another", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp02")
+			errors = append(errors, err)
+		})
+	}
+
+	var getResp zk.GetResponse
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Get("/worker", func(resp zk.GetResponse, err error) {
+				c.addStep("get-resp02")
+				getResp = resp
+				errors = append(errors, err)
+			})
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.CreateApplyError(client1)
+	c.store.GetApply(client2)
+
+	c.store.Retry(client1) // do nothing
+
+	assert.Equal(t, "data01", string(getResp.Data))
+
+	assert.Equal(t, []string{
+		"create-resp01",
+		"create-resp02",
+		"get-resp02",
+	}, c.steps)
+	assert.Equal(t, []error{
+		zk.ErrConnectionClosed,
+		zk.ErrConnectionClosed,
+		nil,
+	}, errors)
+}
+
+func TestFakeClient_Conn_Error_Multi_Times(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+
+	c.store.ConnError(client1)
+
+	assert.PanicsWithValue(t, "Can NOT call ConnError multiple times in a row", func() {
+		c.store.ConnError(client1)
+	})
+}
+
+func TestFakeClient_Create_Child_of_Ephemeral_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.Create("/worker/node01", []byte("data02"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.CreateApply(client1)
+	c.store.CreateApply(client1)
+
+	c.store.PrintData()
+
+	assert.Equal(t, []error{
+		nil,
+		zk.ErrNoChildrenForEphemerals,
+	}, errors)
+}
