@@ -517,13 +517,17 @@ func (s *FakeZookeeper) Retry(clientID FakeClientID) {
 	getActionWithType[RetryInput](s, clientID, "Retry")
 
 	state := s.States[clientID]
+
 	state.ConnErr = false
-	for _, fn := range state.PendingEvents {
-		fn()
-	}
+	pendingEvents := state.PendingEvents
 	state.PendingEvents = nil
+
 	runner := s.Sessions[clientID]
 	runner.Retry()
+
+	for _, fn := range pendingEvents {
+		fn()
+	}
 }
 
 type fakeClient struct {
