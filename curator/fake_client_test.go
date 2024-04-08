@@ -1326,3 +1326,62 @@ func TestFakeClient_Should_Not_Recv_Watch_After_Expired_For_ChildrenW(t *testing
 		"children-resp",
 	}, c.steps)
 }
+
+func TestFakeClient_Retry_Happens_Before_Watch_Handlers(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
+	}
+
+	var getFunc func(sess *Session)
+	getFunc = func(sess *Session) {
+		sess.Run(func(client Client) {
+			c.addStep("get-req")
+			client.Get("/hello", func(resp zk.GetResponse, err error) {
+				c.addStep("get-resp")
+				if stderrors.Is(err, zk.ErrConnectionClosed) {
+					sess.AddRetry(getFunc)
+					return
+				}
+				if err != nil {
+					panic(err)
+				}
+			})
+		})
+	}
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+				c.addStep("children-resp")
+			}, func(ev zk.Event) {
+				c.addStep("children-watch")
+			})
+		})
+
+		getFunc(sess)
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.Begin(client2)
+
+	c.store.ChildrenApply(client2)
+	c.store.ConnError(client2)
+
+	c.store.CreateApply(client1)
+	c.store.Retry(client2)
+
+	assert.Equal(t, []string{
+		"get-req",
+		"children-resp",
+		"get-resp",
+		"get-req",
+		"children-watch",
+	}, c.steps)
+}
