@@ -90,12 +90,51 @@ func (f *FakeZookeeperTester) doConnectionError(client FakeClientID) {
 	}
 }
 
+type runConfig struct {
+	opsErrorPercent float64
+}
+
+func (c runConfig) operationShouldError(randSource *rand.Rand) bool {
+	if c.opsErrorPercent == 0 {
+		return false
+	}
+	n := randSource.Intn(randMax)
+	end := int(c.opsErrorPercent / 100.0 * randMax)
+	if n < end {
+		return true
+	}
+	return false
+}
+
+func newRunConfig(options ...RunOption) runConfig {
+	conf := runConfig{
+		opsErrorPercent: 0.0,
+	}
+	for _, fn := range options {
+		fn(&conf)
+	}
+	return conf
+}
+
+// RunOption ...
+type RunOption func(conf *runConfig)
+
+// WithRunOperationErrorPercentage ...
+func WithRunOperationErrorPercentage(percent float64) RunOption {
+	return func(conf *runConfig) {
+		conf.opsErrorPercent = percent
+	}
+}
+
 // RunSessionExpiredAndConnectionError ...
 func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 	sessionExpiredPercentage float64,
 	connectionErrorPercentage float64,
 	numSteps int,
+	options ...RunOption,
 ) int {
+	conf := newRunConfig(options...)
+
 	sessionExpiredEnd := int(sessionExpiredPercentage / 100.0 * randMax)
 	connectionErrorEnd := int(connectionErrorPercentage / 100.0 * randMax)
 
@@ -123,15 +162,27 @@ func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 		genericCmd := f.store.Pending[client][0]
 		switch genericCmd.(type) {
 		case CreateInput:
-			f.store.CreateApply(client)
+			if conf.operationShouldError(f.rand) {
+				f.store.CreateApplyError(client)
+			} else {
+				f.store.CreateApply(client)
+			}
 		case GetInput:
 			f.store.GetApply(client)
 		case ChildrenInput:
 			f.store.ChildrenApply(client)
 		case DeleteInput:
-			f.store.DeleteApply(client)
+			if conf.operationShouldError(f.rand) {
+				f.store.DeleteApplyError(client)
+			} else {
+				f.store.DeleteApply(client)
+			}
 		case SetInput:
-			f.store.SetApply(client)
+			if conf.operationShouldError(f.rand) {
+				f.store.SetApplyError(client)
+			} else {
+				f.store.SetApply(client)
+			}
 		case RetryInput:
 			f.store.Retry(client)
 		default:

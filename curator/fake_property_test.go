@@ -3,6 +3,7 @@ package curator
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -187,4 +188,44 @@ func TestFakeZookeeperTester_Master_Lock__Multi_Times(t *testing.T) {
 			1000,
 		)
 	}
+}
+
+func TestFakeZookeeperTester_Master_Lock__Multi_Times__With_Ops_Error(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		seed := time.Now().UnixNano()
+		fmt.Println("SEED:", seed)
+
+		store := NewFakeZookeeper()
+		tester := NewFakeZookeeperTester(store, []FakeClientID{
+			client1,
+			client2,
+			client3,
+		}, seed)
+
+		newSimpleLock(store, client1)
+		newSimpleLock(store, client2)
+		newSimpleLock(store, client3)
+
+		tester.Begin()
+
+		tester.RunSessionExpiredAndConnectionError(
+			10,
+			10,
+			1000,
+			WithRunOperationErrorPercentage(15),
+		)
+	}
+}
+
+func TestRunConfig(t *testing.T) {
+	c := newRunConfig(WithRunOperationErrorPercentage(20))
+
+	source := rand.New(rand.NewSource(1234))
+	trueCount := 0
+	for i := 0; i < 1000; i++ {
+		if c.operationShouldError(source) {
+			trueCount++
+		}
+	}
+	assert.Equal(t, 214, trueCount)
 }
