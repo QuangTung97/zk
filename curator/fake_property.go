@@ -127,6 +127,8 @@ func WithRunOperationErrorPercentage(percent float64) RunOption {
 }
 
 // RunSessionExpiredAndConnectionError ...
+//
+//revive:disable-next-line:cognitive-complexity,cyclomatic
 func (f *FakeZookeeperTester) RunSessionExpiredAndConnectionError(
 	sessionExpiredPercentage float64,
 	connectionErrorPercentage float64,
