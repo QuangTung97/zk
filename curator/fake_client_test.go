@@ -1488,3 +1488,77 @@ func TestFakeClient_Create_Child_of_Ephemeral_Error(t *testing.T) {
 		zk.ErrNoChildrenForEphemerals,
 	}, errors)
 }
+
+func TestFakeClient__Set_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp")
+			errors = append(errors, err)
+		})
+		client.Set("/worker", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
+			c.addStep("set-resp")
+			errors = append(errors, err)
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.CreateApply(client1)
+	c.store.SetApplyError(client1)
+
+	c.store.Retry(client1)
+
+	assert.Equal(t, []error{
+		nil,
+		zk.ErrConnectionClosed,
+	}, errors)
+	assert.Equal(t, []string{
+		"create-resp",
+		"set-resp",
+	}, c.steps)
+
+	node := c.store.Root.Children[0]
+	assert.Equal(t, "worker", node.Name)
+	assert.Equal(t, "data02", string(node.Data))
+}
+
+func TestFakeClient__Delete_Error(t *testing.T) {
+	c := newFakeClientTest()
+
+	var errors []error
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp")
+			errors = append(errors, err)
+		})
+		client.Delete("/worker", 0, func(resp zk.DeleteResponse, err error) {
+			c.addStep("delete-resp")
+			errors = append(errors, err)
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	c.store.Begin(client1)
+	c.store.CreateApply(client1)
+	c.store.DeleteApplyError(client1)
+
+	assert.Equal(t, []error{
+		nil,
+		zk.ErrConnectionClosed,
+	}, errors)
+	assert.Equal(t, []string{
+		"create-resp",
+		"delete-resp",
+	}, c.steps)
+
+	assert.Equal(t, 0, len(c.store.Root.Children))
+}

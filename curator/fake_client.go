@@ -444,6 +444,15 @@ func (s *FakeZookeeper) GetApply(clientID FakeClientID) {
 
 // SetApply ...
 func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
+	s.setApplyWithError(clientID, nil)
+}
+
+// SetApplyError ...
+func (s *FakeZookeeper) SetApplyError(clientID FakeClientID) {
+	s.setApplyWithError(clientID, zk.ErrConnectionClosed)
+}
+
+func (s *FakeZookeeper) setApplyWithError(clientID FakeClientID, err error) {
 	input := getActionWithType[SetInput](s, clientID, "Set")
 
 	node := s.findNode(input.Path)
@@ -465,6 +474,12 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 
 	s.notifyDataWatches(node, input.Path, zk.EventNodeDataChanged)
 
+	if err != nil {
+		input.Callback(zk.SetResponse{}, err)
+		s.ConnError(clientID)
+		return
+	}
+
 	input.Callback(zk.SetResponse{
 		Zxid: s.Zxid,
 		Stat: node.Stat,
@@ -473,6 +488,15 @@ func (s *FakeZookeeper) SetApply(clientID FakeClientID) {
 
 // DeleteApply ...
 func (s *FakeZookeeper) DeleteApply(clientID FakeClientID) {
+	s.deleteApplyWithError(clientID, nil)
+}
+
+// DeleteApplyError ...
+func (s *FakeZookeeper) DeleteApplyError(clientID FakeClientID) {
+	s.deleteApplyWithError(clientID, zk.ErrConnectionClosed)
+}
+
+func (s *FakeZookeeper) deleteApplyWithError(clientID FakeClientID, err error) {
 	input := getActionWithType[DeleteInput](s, clientID, "Delete")
 	node := s.findNode(input.Path)
 	if node == nil {
@@ -501,6 +525,12 @@ func (s *FakeZookeeper) DeleteApply(clientID FakeClientID) {
 
 	s.notifyChildrenWatches(parent, stdpath.Dir(input.Path))
 	s.notifyDataWatches(node, input.Path, zk.EventNodeDeleted)
+
+	if err != nil {
+		input.Callback(zk.DeleteResponse{}, err)
+		s.ConnError(clientID)
+		return
+	}
 
 	input.Callback(zk.DeleteResponse{
 		Zxid: s.Zxid,
