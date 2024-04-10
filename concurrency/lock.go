@@ -45,31 +45,29 @@ func (e *Lock) Start(sess *curator.Session, next func(sess *curator.Session)) {
 }
 
 func (e *Lock) initFunc(sess *curator.Session) {
-	sess.Run(func(client curator.Client) {
-		client.Children(e.parent, func(resp zk.ChildrenResponse, err error) {
-			if err != nil {
-				if errors.Is(err, zk.ErrConnectionClosed) {
-					sess.AddRetry(e.initFunc)
-					return
-				}
-				if errors.Is(err, zk.ErrNoNode) {
-					log.Panicf("ZNode '%s' does NOT exist", e.parent)
-				}
-				panic(err)
+	sess.GetClient().Children(e.parent, func(resp zk.ChildrenResponse, err error) {
+		if err != nil {
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(e.initFunc)
+				return
 			}
+			if errors.Is(err, zk.ErrNoNode) {
+				log.Panicf("ZNode '%s' does NOT exist", e.parent)
+			}
+			panic(err)
+		}
 
-			var prevNode string
-			status := e.computeLockStatus(resp, &prevNode)
-			if status == lockStatusNeedCreate {
-				e.createEphemeral(sess)
-				return
-			}
-			if status == lockStatusBlocked {
-				e.watchPreviousNode(sess, prevNode)
-				return
-			}
-			e.onGranted(sess)
-		})
+		var prevNode string
+		status := e.computeLockStatus(resp, &prevNode)
+		if status == lockStatusNeedCreate {
+			e.createEphemeral(sess)
+			return
+		}
+		if status == lockStatusBlocked {
+			e.watchPreviousNode(sess, prevNode)
+			return
+		}
+		e.onGranted(sess)
 	})
 }
 
@@ -133,43 +131,39 @@ func stringCmp(a, b string) int {
 }
 
 func (e *Lock) createEphemeral(sess *curator.Session) {
-	sess.Run(func(client curator.Client) {
-		p := e.parent + "/node:" + e.nodeID + "-"
-		client.Create(p, nil, zk.FlagEphemeral|zk.FlagSequence,
-			func(resp zk.CreateResponse, err error) {
-				if err != nil {
-					if errors.Is(err, zk.ErrConnectionClosed) {
-						sess.AddRetry(e.initFunc)
-						return
-					}
-					panic(err)
+	p := e.parent + "/node:" + e.nodeID + "-"
+	sess.GetClient().Create(p, nil, zk.FlagEphemeral|zk.FlagSequence,
+		func(resp zk.CreateResponse, err error) {
+			if err != nil {
+				if errors.Is(err, zk.ErrConnectionClosed) {
+					sess.AddRetry(e.initFunc)
+					return
 				}
-				e.initFunc(sess)
-			},
-		)
-	})
+				panic(err)
+			}
+			e.initFunc(sess)
+		},
+	)
 }
 
 func (e *Lock) watchPreviousNode(sess *curator.Session, prevNode string) {
-	sess.Run(func(client curator.Client) {
-		client.GetW(prevNode, func(resp zk.GetResponse, err error) {
-			if err == nil {
-				return
-			}
-			if errors.Is(err, zk.ErrNoNode) {
-				e.initFunc(sess)
-				return
-			}
-			if errors.Is(err, zk.ErrConnectionClosed) {
-				sess.AddRetry(e.initFunc)
-				return
-			}
-			panic(err)
-		}, func(ev zk.Event) {
-			if ev.Type == zk.EventNodeDeleted {
-				e.initFunc(sess)
-				return
-			}
-		})
+	sess.GetClient().GetW(prevNode, func(resp zk.GetResponse, err error) {
+		if err == nil {
+			return
+		}
+		if errors.Is(err, zk.ErrNoNode) {
+			e.initFunc(sess)
+			return
+		}
+		if errors.Is(err, zk.ErrConnectionClosed) {
+			sess.AddRetry(e.initFunc)
+			return
+		}
+		panic(err)
+	}, func(ev zk.Event) {
+		if ev.Type == zk.EventNodeDeleted {
+			e.initFunc(sess)
+			return
+		}
 	})
 }

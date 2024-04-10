@@ -12,10 +12,8 @@ func TestParallelRunner(t *testing.T) {
 		r := NewParallelRunner(
 			New(func(sess *Session) {
 				steps = append(steps, "init01")
-				sess.Run(func(client Client) {
-					sess.AddRetry(func(sess *Session) {
-						steps = append(steps, "retry01")
-					})
+				sess.AddRetry(func(sess *Session) {
+					steps = append(steps, "retry01")
 				})
 			}),
 			New(func(sess *Session) {

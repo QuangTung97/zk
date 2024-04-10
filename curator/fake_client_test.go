@@ -44,15 +44,13 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 		var createErr error
 
 		initFn := func(sess *Session) {
-			sess.Run(func(client Client) {
-				client.Create(
-					"/workers", []byte("data01"), zk.FlagEphemeral,
-					func(resp zk.CreateResponse, err error) {
-						createResp = resp
-						createErr = err
-					},
-				)
-			})
+			sess.GetClient().Create(
+				"/workers", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					createResp = resp
+					createErr = err
+				},
+			)
 		}
 		c.startCuratorClient1(initFn)
 
@@ -92,17 +90,15 @@ func TestFakeClient_CreateUntilSuccess(t *testing.T) {
 
 		var initFn func(sess *Session)
 		initFn = func(sess *Session) {
-			sess.Run(func(client Client) {
-				client.Create(
-					"/workers", []byte("data01"), zk.FlagEphemeral,
-					func(resp zk.CreateResponse, err error) {
-						c.addStep("create-resp")
-						if err != nil {
-							sess.AddRetry(initFn)
-						}
-					},
-				)
-			})
+			sess.GetClient().Create(
+				"/workers", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {
+					c.addStep("create-resp")
+					if err != nil {
+						sess.AddRetry(initFn)
+					}
+				},
+			)
 		}
 		c.startCuratorClient1(initFn)
 
@@ -146,18 +142,17 @@ func TestFakeClient_CreateThenListChildren(t *testing.T) {
 
 		var childrenResp zk.ChildrenResponse
 		initFn := func(sess *Session) {
-			sess.Run(func(client Client) {
-				client.Create(
-					"/workers01", []byte("data01"), zk.FlagEphemeral,
-					func(resp zk.CreateResponse, err error) {},
-				)
-				client.Create(
-					"/workers02", []byte("data01"), zk.FlagEphemeral,
-					func(resp zk.CreateResponse, err error) {},
-				)
-				client.Children("/", func(resp zk.ChildrenResponse, err error) {
-					childrenResp = resp
-				})
+			client := sess.GetClient()
+			client.Create(
+				"/workers01", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {},
+			)
+			client.Create(
+				"/workers02", []byte("data01"), zk.FlagEphemeral,
+				func(resp zk.CreateResponse, err error) {},
+			)
+			client.Children("/", func(resp zk.ChildrenResponse, err error) {
+				childrenResp = resp
 			})
 		}
 		c.startCuratorClient1(initFn)
@@ -188,10 +183,8 @@ func TestFakeClient_ListChildren_Not_Found_Parent(t *testing.T) {
 
 	var childrenErr error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Children("/workers", func(resp zk.ChildrenResponse, err error) {
-				childrenErr = err
-			})
+		sess.GetClient().Children("/workers", func(resp zk.ChildrenResponse, err error) {
+			childrenErr = err
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -210,13 +203,11 @@ func TestFakeClient_Create_Parent_Not_Found(t *testing.T) {
 
 	var createErr error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers/node01", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					createErr = err
-				},
-			)
-		})
+		sess.GetClient().Create("/workers/node01", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				createErr = err
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -234,18 +225,17 @@ func TestFakeClient_Create_Duplicated(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-			client.Create("/workers", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		client := sess.GetClient()
+		client.Create("/workers", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
+		client.Create("/workers", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -269,19 +259,18 @@ func TestFakeClient_ListChildren_With_Watch(t *testing.T) {
 	var errors []error
 	var watchEvent zk.Event
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				errors = append(errors, err)
-			}, func(ev zk.Event) {
-				watchEvent = ev
-			})
-
-			client.Create("/workers", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
+		client := sess.GetClient()
+		client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			errors = append(errors, err)
+		}, func(ev zk.Event) {
+			watchEvent = ev
 		})
+
+		client.Create("/workers", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -309,13 +298,12 @@ func TestFakeClient_GetW_Not_Found(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.GetW("/workers", func(resp zk.GetResponse, err error) {
-				c.addStep("getw-resp")
-				errors = append(errors, err)
-			}, func(ev zk.Event) {
-				c.addStep("getw-watch")
-			})
+		client := sess.GetClient()
+		client.GetW("/workers", func(resp zk.GetResponse, err error) {
+			c.addStep("getw-resp")
+			errors = append(errors, err)
+		}, func(ev zk.Event) {
+			c.addStep("getw-watch")
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -338,21 +326,20 @@ func TestFakeClient_GetW_Found(t *testing.T) {
 	var errors []error
 	var getResp zk.GetResponse
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					c.addStep("create-resp")
-					errors = append(errors, err)
-				},
-			)
-
-			client.GetW("/workers", func(resp zk.GetResponse, err error) {
-				c.addStep("getw-resp")
+		client := sess.GetClient()
+		client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				c.addStep("create-resp")
 				errors = append(errors, err)
-				getResp = resp
-			}, func(ev zk.Event) {
-				c.addStep("getw-watch")
-			})
+			},
+		)
+
+		client.GetW("/workers", func(resp zk.GetResponse, err error) {
+			c.addStep("getw-resp")
+			errors = append(errors, err)
+			getResp = resp
+		}, func(ev zk.Event) {
+			c.addStep("getw-watch")
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -382,10 +369,8 @@ func TestFakeClient_Set_Not_Found(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Set("/workers", []byte("data01"), 0, func(resp zk.SetResponse, err error) {
-				errors = append(errors, err)
-			})
+		sess.GetClient().Set("/workers", []byte("data01"), 0, func(resp zk.SetResponse, err error) {
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -407,21 +392,20 @@ func TestFakeClient_Create_Then_Set(t *testing.T) {
 	var errors []error
 	var respList []zk.SetResponse
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
+		client := sess.GetClient()
+		client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 
-			client.Set("/workers", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
-				errors = append(errors, err)
-				respList = append(respList, resp)
-			})
-			client.Set("/workers", []byte("data03"), 0, func(resp zk.SetResponse, err error) {
-				errors = append(errors, err)
-				respList = append(respList, resp)
-			})
+		client.Set("/workers", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
+			errors = append(errors, err)
+			respList = append(respList, resp)
+		})
+		client.Set("/workers", []byte("data03"), 0, func(resp zk.SetResponse, err error) {
+			errors = append(errors, err)
+			respList = append(respList, resp)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -459,24 +443,23 @@ func TestFakeClient_Create_Then_Getw_Then_Set(t *testing.T) {
 	var getResp zk.GetResponse
 	var watchEvent zk.Event
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-				},
-			)
+		client := sess.GetClient()
+		client.Create("/workers", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+			},
+		)
 
-			client.GetW("/workers", func(resp zk.GetResponse, err error) {
-				getResp = resp
-				errors = append(errors, err)
-				c.addStep("get-resp")
-			}, func(ev zk.Event) {
-				watchEvent = ev
-				c.addStep("get-watch")
-			})
+		client.GetW("/workers", func(resp zk.GetResponse, err error) {
+			getResp = resp
+			errors = append(errors, err)
+			c.addStep("get-resp")
+		}, func(ev zk.Event) {
+			watchEvent = ev
+			c.addStep("get-watch")
+		})
 
-			client.Set("/workers", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
-				c.addStep("set-resp")
-			})
+		client.Set("/workers", []byte("data02"), 0, func(resp zk.SetResponse, err error) {
+			c.addStep("set-resp")
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -518,18 +501,17 @@ func TestFakeClient_Create_Then_Session_Expired(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers01", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-			client.Create("/workers02", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		client := sess.GetClient()
+		client.Create("/workers01", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
+		client.Create("/workers02", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -564,13 +546,11 @@ func TestFakeClient_Create_Then_Session_Expired__Then_New_Session_Established(t 
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers01", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		sess.GetClient().Create("/workers01", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -597,21 +577,20 @@ func TestFakeClient_Create_With_Sequence(t *testing.T) {
 	var errors []error
 	var childrenResp zk.ChildrenResponse
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node01-", []byte("data01"), zk.FlagEphemeral|zk.FlagSequence,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-			client.Create("/node01-", []byte("data02"), zk.FlagEphemeral|zk.FlagSequence,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-			client.Children("/", func(resp zk.ChildrenResponse, err error) {
-				childrenResp = resp
+		client := sess.GetClient()
+		client.Create("/node01-", []byte("data01"), zk.FlagEphemeral|zk.FlagSequence,
+			func(resp zk.CreateResponse, err error) {
 				errors = append(errors, err)
-			})
+			},
+		)
+		client.Create("/node01-", []byte("data02"), zk.FlagEphemeral|zk.FlagSequence,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
+		client.Children("/", func(resp zk.ChildrenResponse, err error) {
+			childrenResp = resp
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -642,13 +621,11 @@ func TestFakeClient_Create_With_Ephemeral__Then_Session_Expired(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node01", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		sess.GetClient().Create("/node01", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -663,10 +640,8 @@ func TestFakeClient_Create_With_Ephemeral__Then_Session_Expired(t *testing.T) {
 	// Create Client 2
 	var childrenResp zk.ChildrenResponse
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Children("/", func(resp zk.ChildrenResponse, err error) {
-				childrenResp = resp
-			})
+		sess.GetClient().Children("/", func(resp zk.ChildrenResponse, err error) {
+			childrenResp = resp
 		})
 	}))
 	c.store.Begin(client2)
@@ -686,26 +661,23 @@ func TestFakeClient_Create_With_Ephemeral_On_Two_Clients(t *testing.T) {
 	var childrenResp zk.ChildrenResponse
 
 	NewFakeClientFactory(c.store, client1).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node01", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		sess.GetClient().Create("/node01", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}))
 
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node02", nil, zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-			client.Children("/", func(resp zk.ChildrenResponse, err error) {
-				childrenResp = resp
+		client := sess.GetClient()
+		client.Create("/node02", nil, zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
 				errors = append(errors, err)
-			})
+			},
+		)
+		client.Children("/", func(resp zk.ChildrenResponse, err error) {
+			childrenResp = resp
+			errors = append(errors, err)
 		})
 	}))
 
@@ -735,33 +707,30 @@ func TestFakeClient_Session_Expired_Another_Client_Watch_Children_And_Watch_Data
 	var watchEvents []zk.Event
 
 	NewFakeClientFactory(c.store, client1).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node01", []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-		})
+		sess.GetClient().Create("/node01", []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
+				errors = append(errors, err)
+			},
+		)
 	}))
 
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				childrenResp = resp
-				errors = append(errors, err)
-				c.addStep("children-resp")
-			}, func(ev zk.Event) {
-				watchEvents = append(watchEvents, ev)
-				c.addStep("children-watch")
-			})
-			client.GetW("/node01", func(resp zk.GetResponse, err error) {
-				errors = append(errors, err)
-				getResp = resp
-				c.addStep("get-resp")
-			}, func(ev zk.Event) {
-				watchEvents = append(watchEvents, ev)
-				c.addStep("get-watch")
-			})
+		client := sess.GetClient()
+		client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			childrenResp = resp
+			errors = append(errors, err)
+			c.addStep("children-resp")
+		}, func(ev zk.Event) {
+			watchEvents = append(watchEvents, ev)
+			c.addStep("children-watch")
+		})
+		client.GetW("/node01", func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
+			getResp = resp
+			c.addStep("get-resp")
+		}, func(ev zk.Event) {
+			watchEvents = append(watchEvents, ev)
+			c.addStep("get-watch")
 		})
 	}))
 
@@ -823,22 +792,21 @@ func TestFakeClient_Get_With_Not_Found_And_Found(t *testing.T) {
 	const pathValue = "/node01"
 
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Get(pathValue, func(resp zk.GetResponse, err error) {
-				errors = append(errors, err)
-				getRespList = append(getRespList, resp)
-			})
+		client := sess.GetClient()
+		client.Get(pathValue, func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
+			getRespList = append(getRespList, resp)
+		})
 
-			client.Create(pathValue, []byte("data01"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {
-					errors = append(errors, err)
-				},
-			)
-
-			client.Get(pathValue, func(resp zk.GetResponse, err error) {
+		client.Create(pathValue, []byte("data01"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {
 				errors = append(errors, err)
-				getRespList = append(getRespList, resp)
-			})
+			},
+		)
+
+		client.Get(pathValue, func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
+			getRespList = append(getRespList, resp)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -870,9 +838,7 @@ func TestFakeClient_Set_Validate_Error(t *testing.T) {
 	c := newFakeClientTest()
 
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Set("/sample/", nil, 0, func(resp zk.SetResponse, err error) {
-			})
+		sess.GetClient().Set("/sample/", nil, 0, func(resp zk.SetResponse, err error) {
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -886,16 +852,15 @@ func TestFakeClient_Print_Data(t *testing.T) {
 	c := newFakeClientTest()
 
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/node01", nil, 0, func(resp zk.CreateResponse, err error) {})
-			client.Create("/node02", nil, 0, func(resp zk.CreateResponse, err error) {})
-			client.Create("/node03", []byte("data01"), 0, func(resp zk.CreateResponse, err error) {})
-			client.Create("/node01/child01", []byte("data02"), 0, func(resp zk.CreateResponse, err error) {})
-			client.Create("/node01/child02", nil, 0, func(resp zk.CreateResponse, err error) {})
-			client.Create("/node03/child03", []byte("data03"), zk.FlagEphemeral,
-				func(resp zk.CreateResponse, err error) {},
-			)
-		})
+		client := sess.GetClient()
+		client.Create("/node01", nil, 0, func(resp zk.CreateResponse, err error) {})
+		client.Create("/node02", nil, 0, func(resp zk.CreateResponse, err error) {})
+		client.Create("/node03", []byte("data01"), 0, func(resp zk.CreateResponse, err error) {})
+		client.Create("/node01/child01", []byte("data02"), 0, func(resp zk.CreateResponse, err error) {})
+		client.Create("/node01/child02", nil, 0, func(resp zk.CreateResponse, err error) {})
+		client.Create("/node03/child03", []byte("data03"), zk.FlagEphemeral,
+			func(resp zk.CreateResponse, err error) {},
+		)
 	}
 	c.startCuratorClient1(initFn)
 
@@ -932,10 +897,8 @@ func TestFakeClient_Delete_Not_Found(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
-				errors = append(errors, err)
-			})
+		sess.GetClient().Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -957,17 +920,16 @@ func TestFakeClient_Delete_After_Create(t *testing.T) {
 	var errors []error
 	var deleteResp zk.DeleteResponse
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
-				deleteResp = resp
-				errors = append(errors, err)
-			})
-			client.Get("/workers", func(resp zk.GetResponse, err error) {
-				errors = append(errors, err)
-			})
+		client := sess.GetClient()
+		client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+			deleteResp = resp
+			errors = append(errors, err)
+		})
+		client.Get("/workers", func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -996,19 +958,18 @@ func TestFakeClient_Delete_Conflict_Version(t *testing.T) {
 
 	var errors []error
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.Set("/workers", []byte("new-data"), 0, func(resp zk.SetResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.Get("/workers", func(resp zk.GetResponse, err error) {
-				errors = append(errors, err)
-			})
+		client := sess.GetClient()
+		client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.Set("/workers", []byte("new-data"), 0, func(resp zk.SetResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.Get("/workers", func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -1036,20 +997,19 @@ func TestFakeClient_Delete_Data_Deleted_Watch(t *testing.T) {
 	var errors []error
 	var watchEvent zk.Event
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.GetW("/workers", func(resp zk.GetResponse, err error) {
-				errors = append(errors, err)
-			}, func(ev zk.Event) {
-				c.addStep("get-watch")
-				watchEvent = ev
-			})
-			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
-				c.addStep("delete-resp")
-				errors = append(errors, err)
-			})
+		client := sess.GetClient()
+		client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.GetW("/workers", func(resp zk.GetResponse, err error) {
+			errors = append(errors, err)
+		}, func(ev zk.Event) {
+			c.addStep("get-watch")
+			watchEvent = ev
+		})
+		client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+			c.addStep("delete-resp")
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -1086,20 +1046,19 @@ func TestFakeClient_Delete_Children_Watch(t *testing.T) {
 	var errors []error
 	var watchEvent zk.Event
 	initFn := func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
-				errors = append(errors, err)
-			})
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				errors = append(errors, err)
-			}, func(ev zk.Event) {
-				c.addStep("children-watch")
-				watchEvent = ev
-			})
-			client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
-				c.addStep("delete-resp")
-				errors = append(errors, err)
-			})
+		client := sess.GetClient()
+		client.Create("/workers", nil, 0, func(resp zk.CreateResponse, err error) {
+			errors = append(errors, err)
+		})
+		client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			errors = append(errors, err)
+		}, func(ev zk.Event) {
+			c.addStep("children-watch")
+			watchEvent = ev
+		})
+		client.Delete("/workers", 0, func(resp zk.DeleteResponse, err error) {
+			c.addStep("delete-resp")
+			errors = append(errors, err)
 		})
 	}
 	c.startCuratorClient1(initFn)
@@ -1133,20 +1092,16 @@ func TestFakeClient_Delete_Children_Watch(t *testing.T) {
 func TestFakeClient_Should_Not_Have_Any_Action_After_Conn_Error(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Get("/workers", func(resp zk.GetResponse, err error) {
+	c.startCuratorClient1(func(sess *Session) {
+		sess.GetClient().Get("/workers", func(resp zk.GetResponse, err error) {
 			if err != nil {
 				if stderrors.Is(err, zk.ErrConnectionClosed) {
-					client.Get("/another", func(resp zk.GetResponse, err error) {})
+					sess.GetClient().Get("/another", func(resp zk.GetResponse, err error) {})
 					return
 				}
 				panic(err)
 			}
 		})
-	}
-
-	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
 	})
 
 	c.store.Begin(client1)
@@ -1160,23 +1115,17 @@ func TestFakeClient_Should_Not_Have_Any_Action_After_Conn_Error(t *testing.T) {
 func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-		})
-	}
-
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.GetW("/worker", func(resp zk.GetResponse, err error) {
-				c.addStep("get-resp")
-			}, func(ev zk.Event) {
-				c.addStep("get-watch")
-			})
+		sess.GetClient().GetW("/worker", func(resp zk.GetResponse, err error) {
+			c.addStep("get-resp")
+		}, func(ev zk.Event) {
+			c.addStep("get-watch")
 		})
 	}))
 
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
 	})
 
 	c.store.Begin(client1)
@@ -1204,23 +1153,17 @@ func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error(t *testing.T) {
 func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error_For_ChildrenW(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-		})
-	}
-
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				c.addStep("children-resp")
-			}, func(ev zk.Event) {
-				c.addStep("children-watch")
-			})
+		sess.GetClient().ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			c.addStep("children-resp")
+		}, func(ev zk.Event) {
+			c.addStep("children-watch")
 		})
 	}))
 
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
 	})
 
 	c.store.Begin(client1)
@@ -1246,23 +1189,17 @@ func TestFakeClient_Should_Not_Recv_Watch_After_Connection_Error_For_ChildrenW(t
 func TestFakeClient_Should_Not_Recv_Watch_After_Conn_Error_And_Expired_For_ChildrenW(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-		})
-	}
-
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				c.addStep("children-resp")
-			}, func(ev zk.Event) {
-				c.addStep("children-watch")
-			})
+		sess.GetClient().ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			c.addStep("children-resp")
+		}, func(ev zk.Event) {
+			c.addStep("children-watch")
 		})
 	}))
 
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
 	})
 
 	c.store.Begin(client1)
@@ -1291,22 +1228,16 @@ func TestFakeClient_Should_Not_Recv_Watch_After_Conn_Error_And_Expired_For_Child
 func TestFakeClient_Should_Not_Recv_Watch_After_Expired_For_ChildrenW(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {})
-	}
-
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				c.addStep("children-resp")
-			}, func(ev zk.Event) {
-				c.addStep("children-watch")
-			})
+		sess.GetClient().ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			c.addStep("children-resp")
+		}, func(ev zk.Event) {
+			c.addStep("children-watch")
 		})
 	}))
 
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {})
 	})
 
 	c.store.Begin(client1)
@@ -1330,42 +1261,34 @@ func TestFakeClient_Should_Not_Recv_Watch_After_Expired_For_ChildrenW(t *testing
 func TestFakeClient_Retry_Happens_Before_Watch_Handlers(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-		})
-	}
-
 	var getFunc func(sess *Session)
 	getFunc = func(sess *Session) {
-		sess.Run(func(client Client) {
-			c.addStep("get-req")
-			client.Get("/hello", func(resp zk.GetResponse, err error) {
-				c.addStep("get-resp")
-				if stderrors.Is(err, zk.ErrConnectionClosed) {
-					sess.AddRetry(getFunc)
-					return
-				}
-				if err != nil {
-					panic(err)
-				}
-			})
+		c.addStep("get-req")
+		sess.GetClient().Get("/hello", func(resp zk.GetResponse, err error) {
+			c.addStep("get-resp")
+			if stderrors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(getFunc)
+				return
+			}
+			if err != nil {
+				panic(err)
+			}
 		})
 	}
 
 	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
-				c.addStep("children-resp")
-			}, func(ev zk.Event) {
-				c.addStep("children-watch")
-			})
+		sess.GetClient().ChildrenW("/", func(resp zk.ChildrenResponse, err error) {
+			c.addStep("children-resp")
+		}, func(ev zk.Event) {
+			c.addStep("children-watch")
 		})
 
 		getFunc(sess)
 	}))
 
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
 	})
 
 	c.store.Begin(client1)
@@ -1391,7 +1314,17 @@ func TestFakeClient_Create_With_Error(t *testing.T) {
 
 	var errors []error
 
-	callback := func(client Client) {
+	var getResp zk.GetResponse
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.GetClient().Get("/worker", func(resp zk.GetResponse, err error) {
+			c.addStep("get-resp02")
+			getResp = resp
+			errors = append(errors, err)
+		})
+	}))
+
+	c.startCuratorClient1(func(sess *Session) {
+		client := sess.GetClient()
 		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
 			c.addStep("create-resp01")
 			errors = append(errors, err)
@@ -1400,21 +1333,6 @@ func TestFakeClient_Create_With_Error(t *testing.T) {
 			c.addStep("create-resp02")
 			errors = append(errors, err)
 		})
-	}
-
-	var getResp zk.GetResponse
-	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
-		sess.Run(func(client Client) {
-			client.Get("/worker", func(resp zk.GetResponse, err error) {
-				c.addStep("get-resp02")
-				getResp = resp
-				errors = append(errors, err)
-			})
-		})
-	}))
-
-	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
 	})
 
 	c.store.Begin(client1)
@@ -1442,13 +1360,9 @@ func TestFakeClient_Create_With_Error(t *testing.T) {
 func TestFakeClient_Conn_Error_Multi_Times(t *testing.T) {
 	c := newFakeClientTest()
 
-	callback := func(client Client) {
-		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-		})
-	}
-
 	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
+		sess.GetClient().Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		})
 	})
 
 	c.store.Begin(client1)
@@ -1464,17 +1378,15 @@ func TestFakeClient_Create_Child_of_Ephemeral_Error(t *testing.T) {
 	c := newFakeClientTest()
 
 	var errors []error
-	callback := func(client Client) {
+
+	c.startCuratorClient1(func(sess *Session) {
+		client := sess.GetClient()
 		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
 			errors = append(errors, err)
 		})
 		client.Create("/worker/node01", []byte("data02"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
 			errors = append(errors, err)
 		})
-	}
-
-	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
 	})
 
 	c.store.Begin(client1)
@@ -1493,7 +1405,9 @@ func TestFakeClient__Set_Error(t *testing.T) {
 	c := newFakeClientTest()
 
 	var errors []error
-	callback := func(client Client) {
+
+	c.startCuratorClient1(func(sess *Session) {
+		client := sess.GetClient()
 		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
 			c.addStep("create-resp")
 			errors = append(errors, err)
@@ -1502,10 +1416,6 @@ func TestFakeClient__Set_Error(t *testing.T) {
 			c.addStep("set-resp")
 			errors = append(errors, err)
 		})
-	}
-
-	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
 	})
 
 	c.store.Begin(client1)
@@ -1532,7 +1442,9 @@ func TestFakeClient__Delete_Error(t *testing.T) {
 	c := newFakeClientTest()
 
 	var errors []error
-	callback := func(client Client) {
+
+	c.startCuratorClient1(func(sess *Session) {
+		client := sess.GetClient()
 		client.Create("/worker", []byte("data01"), zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
 			c.addStep("create-resp")
 			errors = append(errors, err)
@@ -1541,10 +1453,6 @@ func TestFakeClient__Delete_Error(t *testing.T) {
 			c.addStep("delete-resp")
 			errors = append(errors, err)
 		})
-	}
-
-	c.startCuratorClient1(func(sess *Session) {
-		sess.Run(callback)
 	})
 
 	c.store.Begin(client1)
@@ -1561,4 +1469,45 @@ func TestFakeClient__Delete_Error(t *testing.T) {
 	}, c.steps)
 
 	assert.Equal(t, 0, len(c.store.Root.Children))
+}
+
+func TestFakeClient__Session_Expired_And_Then_Begin__Not_Keeping_Old_Watch(t *testing.T) {
+	c := newFakeClientTest()
+
+	c.startCuratorClient1(func(sess *Session) {
+		client := sess.GetClient()
+		client.Create("/worker", []byte("data01"), 0, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp")
+		})
+		client.GetW("/worker", func(resp zk.GetResponse, err error) {
+			c.addStep("getw-resp")
+		}, func(ev zk.Event) {
+			c.addStep("getw-watch")
+		})
+	})
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.GetClient().Delete("/worker", 0, func(resp zk.DeleteResponse, err error) {
+			c.addStep("delete-resp")
+		})
+	}))
+
+	c.store.Begin(client1)
+	c.store.CreateApply(client1)
+	c.store.GetApply(client1)
+
+	c.store.SessionExpired(client1)
+	c.store.Begin(client1)
+
+	c.store.Begin(client2)
+	c.store.DeleteApply(client2)
+
+	c.store.PrintData()
+	c.store.PrintPendingCalls()
+
+	assert.Equal(t, []string{
+		"create-resp",
+		"getw-resp",
+		"delete-resp",
+	}, c.steps)
 }

@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"time"
 
 	"github.com/QuangTung97/zk/concurrency"
 	"github.com/QuangTung97/zk/curator"
@@ -50,13 +49,5 @@ func main() {
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
-
-	for i := 0; i < 6000; i++ {
-		time.Sleep(1 * time.Second)
-		select {
-		case <-ch:
-			return
-		default:
-		}
-	}
+	<-ch
 }

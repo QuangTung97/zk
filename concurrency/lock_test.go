@@ -22,12 +22,10 @@ func initStore(parent string) *curator.FakeZookeeper {
 
 	c := curator.NewFakeClientFactory(store, initClient)
 	c.Start(curator.New(func(sess *curator.Session) {
-		sess.Run(func(client curator.Client) {
-			client.Create(parent, nil, 0, func(resp zk.CreateResponse, err error) {
-				if err != nil {
-					panic(err)
-				}
-			})
+		sess.GetClient().Create(parent, nil, 0, func(resp zk.CreateResponse, err error) {
+			if err != nil {
+				panic(err)
+			}
 		})
 	}))
 
@@ -394,6 +392,38 @@ func TestLock_With_Tester__Multi_Times(t *testing.T) {
 			20,
 			20,
 			2000,
+		)
+		assert.Equal(t, 2000, steps)
+	}
+}
+
+func TestLock_With_Tester__Multi_Times__With_Ops_Error(t *testing.T) {
+	for k := 0; k < 1000; k++ {
+		seed := time.Now().UnixNano()
+		fmt.Println("SEED:", seed)
+
+		l1 := NewLock("/workers", "node01")
+		l2 := NewLock("/workers", "node02")
+		l3 := NewLock("/workers", "node03")
+
+		store := initStore("/workers")
+
+		tester := curator.NewFakeZookeeperTester(store,
+			[]curator.FakeClientID{client1, client2, client3},
+			seed,
+		)
+
+		startLock(l1, store, client1, newSimpleCounter(client1).isLeader)
+		startLock(l2, store, client2, newSimpleCounter(client2).isLeader)
+		startLock(l3, store, client3, newSimpleCounter(client3).isLeader)
+
+		tester.Begin()
+
+		steps := tester.RunSessionExpiredAndConnectionError(
+			10,
+			10,
+			2000,
+			curator.WithRunOperationErrorPercentage(10),
 		)
 		assert.Equal(t, 2000, steps)
 	}

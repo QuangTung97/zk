@@ -24,10 +24,8 @@ func TestCurator(t *testing.T) {
 		steps := make([]string, 0)
 		c := New(func(sess *Session) {
 			steps = append(steps, "start")
-			sess.Run(func(client Client) {
-				sess.AddRetry(func(sess *Session) {
-					steps = append(steps, "retry")
-				})
+			sess.AddRetry(func(sess *Session) {
+				steps = append(steps, "retry")
 			})
 		})
 
@@ -41,10 +39,8 @@ func TestCurator(t *testing.T) {
 		steps := make([]string, 0)
 		c := New(func(sess *Session) {
 			steps = append(steps, "start")
-			sess.Run(func(client Client) {
-				sess.AddRetry(func(sess *Session) {
-					steps = append(steps, "retry")
-				})
+			sess.AddRetry(func(sess *Session) {
+				steps = append(steps, "retry")
 			})
 		})
 
@@ -55,25 +51,6 @@ func TestCurator(t *testing.T) {
 		c.Retry()
 
 		assert.Equal(t, []string{"start", "start", "retry"}, steps)
-	})
-
-	t.Run("callback after end", func(t *testing.T) {
-		steps := make([]string, 0)
-		var callback func()
-		c := New(func(sess *Session) {
-			steps = append(steps, "start")
-			callback = func() {
-				sess.Run(func(client Client) {
-					steps = append(steps, "run-callback")
-				})
-			}
-		})
-
-		c.Begin(nil)
-		c.End()
-		callback()
-
-		assert.Equal(t, []string{"start"}, steps)
 	})
 }
 

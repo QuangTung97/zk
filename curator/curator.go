@@ -77,29 +77,9 @@ func (c *Curator) End() {
 	c.sess = nil
 }
 
-type nullClient struct {
-	valid  bool
-	client Client
-}
-
-func (s *Session) getClient() nullClient {
-	if s.state.sess != s {
-		return nullClient{}
-	}
-	return nullClient{
-		valid:  true,
-		client: s.state.client,
-	}
-}
-
-// Run allows to access to the Client object for accessing zookeeper.
-// The callback fn function is only be called when the session is still active.
-func (s *Session) Run(fn func(client Client)) {
-	sessClient := s.getClient()
-	if !sessClient.valid {
-		return
-	}
-	fn(sessClient.client)
+// GetClient returns Client
+func (s *Session) GetClient() Client {
+	return s.state.client
 }
 
 // AddRetry add a callback function that will be called after connection is re-established.
