@@ -29,64 +29,58 @@ func newSimpleLock(store *FakeZookeeper, client FakeClientID) *simpleLock {
 }
 
 func (l *simpleLock) start(sess *Session) {
-	sess.Run(func(client Client) {
-		client.Create("/master", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
-			if err != nil {
-				if errors.Is(err, zk.ErrNodeExists) {
-					l.onFollower(sess)
-					return
-				}
-				if errors.Is(err, zk.ErrConnectionClosed) {
-					return
-				}
-				panic(err)
+	sess.GetClient().Create("/master", nil, zk.FlagEphemeral, func(resp zk.CreateResponse, err error) {
+		if err != nil {
+			if errors.Is(err, zk.ErrNodeExists) {
+				l.onFollower(sess)
+				return
 			}
-			l.isLeader(sess)
-		})
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				return
+			}
+			panic(err)
+		}
+		l.isLeader(sess)
 	})
 }
 
 func (l *simpleLock) onFollower(sess *Session) {
-	sess.Run(func(client Client) {
-		client.GetW("/master", func(resp zk.GetResponse, err error) {
-			if err != nil {
-				if errors.Is(err, zk.ErrConnectionClosed) {
-					sess.AddRetry(l.onFollower)
-					return
-				}
-				if errors.Is(err, zk.ErrNoNode) {
-					l.onFollower(sess)
-					return
-				}
-				panic(err)
+	sess.GetClient().GetW("/master", func(resp zk.GetResponse, err error) {
+		if err != nil {
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(l.onFollower)
+				return
 			}
-		}, func(ev zk.Event) {
-			l.start(sess)
-		})
+			if errors.Is(err, zk.ErrNoNode) {
+				l.onFollower(sess)
+				return
+			}
+			panic(err)
+		}
+	}, func(ev zk.Event) {
+		l.start(sess)
 	})
 }
 
 func (l *simpleLock) isLeader(sess *Session) {
-	sess.Run(func(client Client) {
-		client.Get("/counter", func(resp zk.GetResponse, err error) {
-			if err != nil {
-				if errors.Is(err, zk.ErrNoNode) {
-					l.increase(sess, 1, 0)
-					return
-				}
-				if errors.Is(err, zk.ErrConnectionClosed) {
-					sess.AddRetry(l.isLeader)
-					return
-				}
-				panic(err)
+	sess.GetClient().Get("/counter", func(resp zk.GetResponse, err error) {
+		if err != nil {
+			if errors.Is(err, zk.ErrNoNode) {
+				l.increase(sess, 1, 0)
+				return
 			}
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(l.isLeader)
+				return
+			}
+			panic(err)
+		}
 
-			num, err := strconv.ParseInt(string(resp.Data), 10, 64)
-			if err != nil {
-				panic(err)
-			}
-			l.increase(sess, int(num)+1, resp.Stat.Version)
-		})
+		num, err := strconv.ParseInt(string(resp.Data), 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		l.increase(sess, int(num)+1, resp.Stat.Version)
 	})
 }
 
@@ -121,13 +115,12 @@ func (l *simpleLock) createCounterResp(sess *Session) func(_ zk.CreateResponse, 
 }
 
 func (l *simpleLock) increase(sess *Session, nextVal int, version int32) {
-	sess.Run(func(client Client) {
-		if nextVal > 1 {
-			client.Set("/counter", numToBytes(nextVal), version, l.setCounterResp(sess))
-		} else {
-			client.Create("/counter", numToBytes(nextVal), 0, l.createCounterResp(sess))
-		}
-	})
+	client := sess.GetClient()
+	if nextVal > 1 {
+		client.Set("/counter", numToBytes(nextVal), version, l.setCounterResp(sess))
+	} else {
+		client.Create("/counter", numToBytes(nextVal), 0, l.createCounterResp(sess))
+	}
 }
 
 func TestFakeZookeeperTester_Master_Lock(t *testing.T) {

@@ -19,26 +19,24 @@ func newSimpleCounter(client curator.FakeClientID) *simpleCounter {
 }
 
 func (l *simpleCounter) isLeader(sess *curator.Session) {
-	sess.Run(func(client curator.Client) {
-		client.Get("/counter", func(resp zk.GetResponse, err error) {
-			if err != nil {
-				if errors.Is(err, zk.ErrNoNode) {
-					l.increase(sess, 1, 0)
-					return
-				}
-				if errors.Is(err, zk.ErrConnectionClosed) {
-					sess.AddRetry(l.isLeader)
-					return
-				}
-				panic(err)
+	sess.GetClient().Get("/counter", func(resp zk.GetResponse, err error) {
+		if err != nil {
+			if errors.Is(err, zk.ErrNoNode) {
+				l.increase(sess, 1, 0)
+				return
 			}
+			if errors.Is(err, zk.ErrConnectionClosed) {
+				sess.AddRetry(l.isLeader)
+				return
+			}
+			panic(err)
+		}
 
-			num, err := strconv.ParseInt(string(resp.Data), 10, 64)
-			if err != nil {
-				panic(err)
-			}
-			l.increase(sess, int(num)+1, resp.Stat.Version)
-		})
+		num, err := strconv.ParseInt(string(resp.Data), 10, 64)
+		if err != nil {
+			panic(err)
+		}
+		l.increase(sess, int(num)+1, resp.Stat.Version)
 	})
 }
 
@@ -73,11 +71,10 @@ func (l *simpleCounter) createCounterResp(sess *curator.Session) func(_ zk.Creat
 }
 
 func (l *simpleCounter) increase(sess *curator.Session, nextVal int, version int32) {
-	sess.Run(func(client curator.Client) {
-		if nextVal > 1 {
-			client.Set("/counter", numToBytes(nextVal), version, l.setCounterResp(sess))
-		} else {
-			client.Create("/counter", numToBytes(nextVal), 0, l.createCounterResp(sess))
-		}
-	})
+	client := sess.GetClient()
+	if nextVal > 1 {
+		client.Set("/counter", numToBytes(nextVal), version, l.setCounterResp(sess))
+	} else {
+		client.Create("/counter", numToBytes(nextVal), 0, l.createCounterResp(sess))
+	}
 }
