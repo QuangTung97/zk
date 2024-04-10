@@ -1562,3 +1562,49 @@ func TestFakeClient__Delete_Error(t *testing.T) {
 
 	assert.Equal(t, 0, len(c.store.Root.Children))
 }
+
+func TestFakeClient__Session_Expired_And_Then_Begin__Not_Keeping_Old_Watch(t *testing.T) {
+	c := newFakeClientTest()
+
+	callback := func(client Client) {
+		client.Create("/worker", []byte("data01"), 0, func(resp zk.CreateResponse, err error) {
+			c.addStep("create-resp")
+		})
+		client.GetW("/worker", func(resp zk.GetResponse, err error) {
+			c.addStep("getw-resp")
+		}, func(ev zk.Event) {
+			c.addStep("getw-watch")
+		})
+	}
+
+	c.startCuratorClient1(func(sess *Session) {
+		sess.Run(callback)
+	})
+
+	NewFakeClientFactory(c.store, client2).Start(New(func(sess *Session) {
+		sess.Run(func(client Client) {
+			client.Delete("/worker", 0, func(resp zk.DeleteResponse, err error) {
+				c.addStep("delete-resp")
+			})
+		})
+	}))
+
+	c.store.Begin(client1)
+	c.store.CreateApply(client1)
+	c.store.GetApply(client1)
+
+	c.store.SessionExpired(client1)
+	c.store.Begin(client1)
+
+	c.store.Begin(client2)
+	c.store.DeleteApply(client2)
+
+	c.store.PrintData()
+	c.store.PrintPendingCalls()
+
+	assert.Equal(t, []string{
+		"create-resp",
+		"getw-resp",
+		"delete-resp",
+	}, c.steps)
+}

@@ -581,8 +581,12 @@ func (c *fakeClient) Get(path string, callback func(resp zk.GetResponse, err err
 }
 
 func (c *fakeClient) buildWatcher(fn func(ev zk.Event)) func(ev zk.Event) {
+	sessionID := c.store.States[c.clientID].SessionID
 	return func(ev zk.Event) {
 		state := c.store.States[c.clientID]
+		if state.SessionID != sessionID {
+			return
+		}
 		if state.ConnErr {
 			state.PendingEvents = append(state.PendingEvents, func() {
 				fn(ev)
